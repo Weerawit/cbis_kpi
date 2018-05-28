@@ -48,7 +48,6 @@ class ZabbixCollector(object):
         for (cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
              cbis_zabbix_last_sync) in curr:
             cbis_zabbix_last_sync = self._collect_pod(cbis_pod_id=cbis_pod_id,
-                                                      cbis_pod_name=cbis_pod_name,
                                                       cbis_zabbix_url=cbis_zabbix_url,
                                                       cbis_zabbix_username=cbis_zabbix_username,
                                                       cbis_zabbix_password=cbis_zabbix_password,
@@ -60,7 +59,7 @@ class ZabbixCollector(object):
 
         curr.close()
 
-    def _collect_pod(self, cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
+    def _collect_pod(self, cbis_pod_id, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
                      cbis_zabbix_last_sync):
 
         self.log.info('connecting to zabbix url : %s' % (cbis_zabbix_url,))
@@ -87,18 +86,12 @@ class ZabbixCollector(object):
                              output=['name', 'key_', 'value_type', 'hostid', 'units'])
 
         items_id_from_type = collections.defaultdict(list)
-        # items_id_type_0 = []
-        # items_id_type_3 = []
+
         items_data = {}
         for item in items:
             item_id = item['itemid']
 
             items_id_from_type[item['value_type']].append(item_id)
-
-            # if '0' == item['value_type']:
-            #     items_id_type_0.append(item_id)
-            # elif '3' == item['value_type']:
-            #     items_id_type_3.append(item_id)
 
             items_data[item_id] = item
             item['hostname'] = host_data[item['hostid']]['name']
@@ -174,8 +167,8 @@ class ZabbixCollector(object):
         curr = conn.cursor()
 
         curr.executemany(
-            'INSERT INTO cbis_zabbix_agg (cbis_pod_id, hostname, item_key, item_value, item_unit, item_agg_type, clock) '
-            'VALUES (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_value)s, %(item_unit)s, %(item_agg_type)s, %(clock)s)',
+            'INSERT INTO cbis_zabbix_raw (cbis_pod_id, hostname, item_key, item_value, item_unit, item_type, clock) '
+            'VALUES (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_value)s, %(item_unit)s, %(item_type)s, %(clock)s)',
             records)
 
         curr.close()
@@ -198,7 +191,7 @@ class ZabbixCollector(object):
                                    'item_key': item['key_'],
                                    'item_value': max_value,
                                    'item_unit': item['units'],
-                                   'item_agg_type': 'max'})
+                                   'item_type': 'max'})
 
             output_records.append({'cbis_pod_id': cbis_pod_id,
                                    'clock': clock,
@@ -206,7 +199,7 @@ class ZabbixCollector(object):
                                    'item_key': item['key_'],
                                    'item_value': min_value,
                                    'item_unit': item['units'],
-                                   'item_agg_type': 'min'})
+                                   'item_type': 'min'})
 
             output_records.append({'cbis_pod_id': cbis_pod_id,
                                    'clock': clock,
@@ -214,7 +207,7 @@ class ZabbixCollector(object):
                                    'item_key': item['key_'],
                                    'item_value': avg_value,
                                    'item_unit': item['units'],
-                                   'item_agg_type': 'avg'})
+                                   'item_type': 'avg'})
         else:
             values = [str(value) for value in history_values]
 
@@ -224,7 +217,7 @@ class ZabbixCollector(object):
                                    'item_key': item['key_'],
                                    'item_value': values[0],
                                    'item_unit': item['units'],
-                                   'item_agg_type': 'str'})
+                                   'item_type': 'str'})
 
         return output_records
 
