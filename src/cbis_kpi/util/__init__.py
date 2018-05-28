@@ -17,7 +17,7 @@ class Config(object):
                                 '/tmp/cbis_kpi.conf', '/etc/cbis_kpi/cbis_kpi.conf']
         self._config = SafeConfigParser()
         self._config.read(self._config_location)
-        self.logger = logging.getLogger('util.Config')
+        self.log = logging.getLogger(self.__class__.__name__)
         self._db_pool = self._create_db_pool()
 
     def get(self, section, option, default=None):
@@ -26,12 +26,12 @@ class Config(object):
         except NoSectionError:
             if default:
                 return default
-            self.logger.exception('NoSectionError : %s' % section)
+            self.log.exception('NoSectionError : %s' % section)
             raise ConfigError()
         except NoOptionError:
             if default:
                 return default
-            self.logger.exception('NoOptionError : %s [%s]' % (option, section))
+            self.log.exception('NoOptionError : %s [%s]' % (option, section))
             raise ConfigError()
 
     def _create_db_pool(self):
@@ -49,17 +49,17 @@ class Config(object):
 
         except mysql.connector.Error as err:
             if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
-                self.logger.exception("Something is wrong with your user name or password")
+                self.log.exception("Something is wrong with your user name or password")
             elif err.errno == errorcode.ER_BAD_DB_ERROR:
-                self.logger.exception("Database does not exist")
+                self.log.exception("Database does not exist")
             else:
-                self.logger.exception(err)
+                self.log.exception(err)
 
     def get_db_connect(self):
         return self._db_pool
 
     def __del__(self):
-        self.logger.info('closing database connection')
+        self.log.info('closing database connection')
         self._db_pool.close()
 
 

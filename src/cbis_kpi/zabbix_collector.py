@@ -9,10 +9,10 @@ import collections
 import util
 
 
-class ZabbixClient(object):
+class ZabbixCollector(object):
 
     def __init__(self):
-        self.logger = logging.getLogger('ZabbixClient')
+        self.log = logging.getLogger(self.__class__.__name__)
         self._config = util.Config()
         self._item_keys = []
         self._period_data = 60
@@ -36,7 +36,7 @@ class ZabbixClient(object):
         curr.close()
 
     def collect(self):
-        self.logger.info('Connecting to database')
+        self.log.info('Connecting to database')
 
         conn = self._conn
 
@@ -62,6 +62,9 @@ class ZabbixClient(object):
 
     def _collect_pod(self, cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
                      cbis_zabbix_last_sync):
+
+        self.log.info('connecting to zabbix url : %s' % (cbis_zabbix_url,))
+
         api = pyzabbix.ZabbixAPI(cbis_zabbix_url)
         api.session.verify = False
         api.login(user=cbis_zabbix_username, password=cbis_zabbix_password)
@@ -112,7 +115,7 @@ class ZabbixClient(object):
             history_objects = []
             time_till = int(cbis_zabbix_last_sync) + 60 * self._period_data
             for item_type in items_id_from_type:
-                self.logger.info('Getting history.get from %s to %s for item_type %s' % (
+                self.log.info('Getting history.get from %s to %s for item_type %s' % (
                     time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(cbis_zabbix_last_sync)),
                     time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time_till)),
                     item_type))
@@ -229,5 +232,5 @@ class ZabbixClient(object):
 if __name__ == '__main__':
     PATH = os.path.dirname(os.path.abspath(__file__))
     logging.config.fileConfig(os.path.join(PATH, 'logging.ini'))
-    client = ZabbixClient()
+    client = ZabbixCollector()
     client.collect()
