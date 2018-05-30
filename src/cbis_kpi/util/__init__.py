@@ -1,6 +1,5 @@
 from ConfigParser import SafeConfigParser, NoSectionError, NoOptionError
 import logging
-
 import mysql.connector.pooling
 from mysql.connector import errorcode
 
