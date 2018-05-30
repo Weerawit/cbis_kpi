@@ -6,6 +6,7 @@ import logging.config
 import time
 import collections
 import util
+import xml.etree.ElementTree as ET
 from datetime import timedelta, datetime
 from util.ssh_executor import SshExecutor
 
@@ -40,9 +41,14 @@ class VirshCollector(object):
                       'test_flag': False}
 
             executor = SshExecutor(cbis_undercloud_addr, cbis_undercloud_username, **kwargs)
+
+            executor.run('compute-*',
+                         'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh dumpxml \\\" \$2)}\"',
+                         callback=self.callback_dumpxml)
+
             executor.run('compute-*',
                          'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh domstats \\\" \$2)}\"',
-                         callback=self.callback)
+                         callback=self.callback_stat)
 
             curr.execute('update cbis_pod set cbis_undercloud_last_sync = %s where cbis_pod_id = %s',
                          (cbis_undercloud_current_sync, cbis_pod_id))
@@ -50,7 +56,96 @@ class VirshCollector(object):
 
         curr.close()
 
-    def callback(self, hostname, line_each_node, **kwargs):
+    def callback_dumpxml(self, hostname, line_each_node, **kwargs):
+        cbis_pod_id = kwargs.get('cbis_pod_id')
+        virsh_list_records = []
+        domain_xml = ""
+        found_domain = False
+        for line in line_each_node.splitlines():
+            if not line:
+                continue
+            if "<domain type='kvm'" in line:
+                found_domain = True
+                domain_xml += line
+            elif "</domain>" in line:
+                domain_xml += line
+                found_domain = False
+                virsh_list_records.append(self.parse_xml(hostname, domain_xml, **kwargs))
+                domain_xml = ""
+            elif found_domain:
+                if not line.isspace():
+                    domain_xml += line
+
+        conn = self._conn
+
+        curr = conn.cursor()
+
+        delete_sql = 'delete from cbis_virsh_list where cbis_pod_id = %(cbis_pod_id)s and hostname = %(hostname)s'
+
+        curr.execute(delete_sql, {'cbis_pod_id': cbis_pod_id,
+                                  'hostname': hostname})
+
+        insert_sql = 'insert into cbis_virsh_list (cbis_pod_id, hostname, domain_name, vm_name, vm_flavor, vm_vcpu, vm_memory, vm_numa) ' \
+                     'values (%(cbis_pod_id)s, %(hostname)s, %(domain_name)s, %(vm_name)s, %(vm_flavor)s, %(vm_vcpu)s, %(vm_memory)s, %(vm_numa)s)'
+        curr.executemany(insert_sql, virsh_list_records)
+
+        curr.close()
+
+    def parse_xml(self, hostname, domain_xml, **kwargs):
+        cbis_pod_id = kwargs.get('cbis_pod_id')
+        ns = {'nova': 'http://openstack.org/xmlns/libvirt/nova/1.0'}
+        root = ET.fromstring(domain_xml)
+
+        name = root.find(".//nova:name", ns).text
+        flavor = root.find(".//nova:flavor", ns).attrib['name']
+        memory = root.find(".//nova:memory", ns).text
+        vcpu = root.find(".//nova:vcpus", ns).text
+
+        domain_name = root.find('.//name').text
+
+        cpupin = ""
+        for cpupinroot in root.findall(".//vcpupin"):
+            cpupin += "%s-%s\n" % (cpupinroot.attrib['vcpu'], cpupinroot.attrib['cpuset'])
+
+        numa = "0"
+        try:
+            numa = root.find(".//memnode").attrib['nodeset']
+        except AttributeError:
+            numa = "none"
+
+        disk_size = ""
+        has_writeback = True
+        for diskroot in root.findall(".//disk"):
+            rbd_disk = diskroot.find(".//source").attrib['name']
+            target_disk = diskroot.find(".//target").attrib['dev']
+            writeback = diskroot.find(".//driver").attrib['cache']
+
+            if "writeback" != writeback:
+                has_writeback = False
+
+            size = "unknown"
+            disk_size += "%s [%s] (%s) = %s\n" % (target_disk, writeback, size, rbd_disk)
+
+        is_sriov = False
+        for interface_root in root.findall(".//interface"):
+            if "hostdev" == interface_root.attrib['type']:
+                is_sriov = True
+                break
+
+        return {'cbis_pod_id': cbis_pod_id,
+                'hostname': hostname,
+                'domain_name': domain_name,
+                'vm_name': name,
+                'vm_flavor': flavor,
+                'vm_vcpu': vcpu,
+                'vm_memory': memory,
+                'vm_numa': numa,
+                'cpupin': cpupin,
+                'disk_size': disk_size,
+                'is_sriov': is_sriov,
+                'has_writeback': has_writeback}
+
+    def callback_stat(self, hostname, line_each_node, **kwargs):
         domain_name = None
         cbis_undercloud_last_sync = kwargs.get('cbis_undercloud_last_sync')
         cbis_undercloud_current_sync = kwargs.get('cbis_undercloud_current_sync')
