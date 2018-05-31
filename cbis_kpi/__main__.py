@@ -3,6 +3,7 @@ import sys
 import os
 import logging
 import threading
+import time
 from datetime import datetime
 from zabbix_collector import ZabbixCollector
 from virsh_collector import VirshCollector
@@ -21,31 +22,60 @@ def main(args=sys.argv[1:]):
 
     def zabbix_thread():
         try:
+            start_time = time.time()
+            zabbix.partition()
+            log.info('zabbix partition took %s seconds' % (time.time() - start_time))
+        except Exception:
+            log.exception('error in zabbix partition')
+
+        try:
+            start_time = time.time()
             zabbix.collect()
+            log.info('zabbix collect took %s seconds' % (time.time() - start_time))
         except Exception:
             log.exception('error in zabbix collect')
+
         try:
+            start_time = time.time()
             zabbix.aggregate_hourly()
+            log.info('zabbix aggregate_hourly took %s seconds' % (time.time() - start_time))
         except Exception:
             log.exception('error in zabbix aggregate_hourly')
+
         try:
             if now.hour == 1:
+                start_time = time.time()
                 zabbix.aggregate_daily()
+                log.info('zabbix aggregate_daily took %s seconds' % (time.time() - start_time))
         except Exception:
             log.exception('error in zabbix aggregate_daily')
 
     def virsh_thread():
+
         try:
+            start_time = time.time()
+            virsh.partition()
+            log.info('virsh partition took %s seconds' % (time.time() - start_time))
+        except Exception:
+            log.exception('error in virsh partition')
+
+        try:
+            start_time = time.time()
             virsh.collect()
+            log.info('virsh collect took %s seconds' % (time.time() - start_time))
         except Exception:
             log.exception('error in virsh collect')
         try:
+            start_time = time.time()
             virsh.aggregate_hourly()
+            log.info('virsh aggregate_hourly took %s seconds' % (time.time() - start_time))
         except Exception:
             log.exception('error in virsh aggregate_hourly')
         try:
             if now.hour == 1:
+                start_time = time.time()
                 virsh.aggregate_daily()
+                log.info('virsh aggregate_daily took %s seconds' % (time.time() - start_time))
         except Exception:
             log.exception('error in virsh aggregate_daily')
 

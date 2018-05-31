@@ -22,6 +22,40 @@ class VirshCollector(object):
     def _load_config(self):
         pass
 
+    def _partition_util(self, table_name, number_of_days=14):
+        tomorrow = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        last_days = tomorrow - timedelta(days=number_of_days)
+        with util.DBConnection().get_connection() as conn:
+            curr = conn.cursor()
+
+            try:
+                create_partition_sql = 'alter table %s add partition (' \
+                                       'partition p_%s values less than (%s))' % \
+                                       (table_name, tomorrow.strftime('%s'), tomorrow.strftime('%s'))
+                self.log.info('checking partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+                curr.execute(create_partition_sql)
+                self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+            except:
+                self.log.info('partition not found %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+                pass
+
+            try:
+                drop_partition_sql = 'alter table %s drop partition p_%s' % (table_name, last_days.strftime('%s'),)
+                self.log.info('checking partition to delete for %s p_%s' % (table_name, last_days.strftime('%s'),))
+                curr.execute(drop_partition_sql)
+                self.log.info('dropped partition for %s p_%s' % (table_name, last_days.strftime('%s'),))
+            except:
+                self.log.info('partition not found %s p_%s' % (table_name, last_days.strftime('%s'),))
+                pass
+            conn.commit()
+
+            curr.close()
+
+    def partition(self):
+        self._partition_util('cbis_virsh_stat_raw', 14)
+        self._partition_util('cbis_virsh_stat_hour', 90)
+        self._partition_util('cbis_virsh_stat_day', 365)
+
     def collect(self):
         self.log.info('Connecting to database')
 

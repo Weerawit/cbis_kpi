@@ -10,7 +10,6 @@ from datetime import timedelta, datetime
 import util
 
 
-
 class ZabbixCollector(object):
 
     def __init__(self):
@@ -39,6 +38,40 @@ class ZabbixCollector(object):
             self._item_keys = list(keys)
 
             curr.close()
+
+    def _partition_util(self, table_name, number_of_days=14):
+        tomorrow = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        last_days = tomorrow - timedelta(days=number_of_days)
+        with util.DBConnection().get_connection() as conn:
+            curr = conn.cursor()
+
+            try:
+                create_partition_sql = 'alter table %s add partition (' \
+                                       'partition p_%s values less than (%s))' % \
+                                       (table_name, tomorrow.strftime('%s'), tomorrow.strftime('%s'))
+                self.log.info('checking partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+                curr.execute(create_partition_sql)
+                self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+            except:
+                self.log.info('partition not found %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+                pass
+
+            try:
+                drop_partition_sql = 'alter table %s drop partition p_%s' % (table_name, last_days.strftime('%s'),)
+                self.log.info('checking partition to delete for %s p_%s' % (table_name, last_days.strftime('%s'),))
+                curr.execute(drop_partition_sql)
+                self.log.info('dropped partition for %s p_%s' % (table_name, last_days.strftime('%s'),))
+            except:
+                self.log.info('partition not found %s p_%s' % (table_name, last_days.strftime('%s'),))
+                pass
+            conn.commit()
+
+            curr.close()
+
+    def partition(self):
+        self._partition_util('cbis_zabbix_raw', 14)
+        self._partition_util('cbis_zabbix_hour', 90)
+        self._partition_util('cbis_zabbix_day', 365)
 
     def collect(self):
         self.log.info('Connecting to database')
@@ -319,5 +352,5 @@ if __name__ == '__main__':
     PATH = os.path.dirname(os.path.abspath(__file__))
     logging.config.fileConfig(os.path.join(PATH, 'logging.ini'))
     client = ZabbixCollector()
-    client.collect()
+    client.partition()
     # client.aggregate_daily(now=float((datetime.now() + timedelta(days=1)).strftime('%s')))
