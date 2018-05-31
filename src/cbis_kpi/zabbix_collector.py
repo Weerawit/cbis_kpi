@@ -161,6 +161,9 @@ class ZabbixCollector(object):
             if len(all_clock_timestamp) > 0:
                 cbis_zabbix_last_sync = max(all_clock_timestamp)
 
+        else:
+            self.log.info('Nothing to collect since current period not full period yet. ')
+
         return cbis_zabbix_last_sync
 
     def _save_raw(self, records):

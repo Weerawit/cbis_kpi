@@ -128,9 +128,8 @@ CREATE TABLE `cbis_zabbix_raw` (
 	`cbis_pod_id`               bigint unsigned                           NOT NULL,
 	`hostname`                  varchar(128)    DEFAULT ''                NOT NULL,
 	`item_key`                  varchar(255)    DEFAULT ''                NOT NULL,
-	`item_value`                varchar(255)    DEFAULT ''                 NOT NULL,
+	`item_value`                varchar(255)    DEFAULT ''                NOT NULL,
 	`item_unit`                 varchar(255)    DEFAULT ''                NOT NULL,
-	`item_type`                 varchar(255)    DEFAULT ''                NOT NULL,
 	`clock`                     decimal         DEFAULT '0'               NOT NULL
 ) ENGINE=InnoDB;
 CREATE INDEX `cbis_zabbix_raw_1` ON `cbis_zabbix_raw` (`cbis_pod_id`,`hostname`, `clock`);
