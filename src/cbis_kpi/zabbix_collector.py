@@ -6,7 +6,9 @@ import os
 import logging.config
 import time
 import collections
+from datetime import timedelta, datetime
 import util
+
 
 
 class ZabbixCollector(object):
@@ -16,48 +18,53 @@ class ZabbixCollector(object):
         self._config = util.Config()
         self._item_keys = []
         self._period_data = 60
-        self._conn = self._config.get_db_connect()
+        self._conn = None
         self._load_config()
 
     def _load_config(self):
-        curr = self._conn.cursor()
 
-        curr.execute('select config_key, config_value from config where config_key like %s', ('zabbix_%',))
+        with util.DBConnection().get_connection() as conn:
 
-        keys = set()
-        for (config_key, config_value) in curr:
-            if config_key == 'zabbix_item_key':
-                keys.add(config_value)
-            if config_key == 'zabbix_query_interval':
-                self._period_data = int(config_value)
+            curr = conn.cursor()
 
-        self._item_keys = list(keys)
+            curr.execute('select config_key, config_value from config where config_key like %s', ('zabbix_%',))
 
-        curr.close()
+            keys = set()
+            for (config_key, config_value) in curr:
+                if config_key == 'zabbix_item_key':
+                    keys.add(config_value)
+                if config_key == 'zabbix_query_interval':
+                    self._period_data = int(config_value)
+
+            self._item_keys = list(keys)
+
+            curr.close()
 
     def collect(self):
         self.log.info('Connecting to database')
 
-        conn = self._conn
+        with util.DBConnection().get_connection() as conn:
 
-        curr = conn.cursor()
+            self._conn = conn
 
-        curr.execute('select cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username,'
-                     'cbis_zabbix_password, cbis_zabbix_last_sync from cbis_pod where enable=1')
+            curr = conn.cursor()
 
-        for (cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
-             cbis_zabbix_last_sync) in curr:
-            cbis_zabbix_last_sync = self._collect_pod(cbis_pod_id=cbis_pod_id,
-                                                      cbis_zabbix_url=cbis_zabbix_url,
-                                                      cbis_zabbix_username=cbis_zabbix_username,
-                                                      cbis_zabbix_password=cbis_zabbix_password,
-                                                      cbis_zabbix_last_sync=cbis_zabbix_last_sync)
+            curr.execute('select cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username,'
+                         'cbis_zabbix_password, cbis_zabbix_last_sync from cbis_pod where enable=1')
 
-            curr.execute('update cbis_pod set cbis_zabbix_last_sync = %s where cbis_pod_id = %s',
-                         (cbis_zabbix_last_sync, cbis_pod_id))
-            conn.commit()
+            for (cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
+                 cbis_zabbix_last_sync) in curr:
+                cbis_zabbix_last_sync = self._collect_pod(cbis_pod_id=cbis_pod_id,
+                                                          cbis_zabbix_url=cbis_zabbix_url,
+                                                          cbis_zabbix_username=cbis_zabbix_username,
+                                                          cbis_zabbix_password=cbis_zabbix_password,
+                                                          cbis_zabbix_last_sync=cbis_zabbix_last_sync)
 
-        curr.close()
+                curr.execute('update cbis_pod set cbis_zabbix_last_sync = %s where cbis_pod_id = %s',
+                             (cbis_zabbix_last_sync, cbis_pod_id))
+                conn.commit()
+
+            curr.close()
 
     def _collect_pod(self, cbis_pod_id, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
                      cbis_zabbix_last_sync):
@@ -65,6 +72,7 @@ class ZabbixCollector(object):
         self.log.info('connecting to zabbix url : %s' % (cbis_zabbix_url,))
 
         api = pyzabbix.ZabbixAPI(cbis_zabbix_url)
+
         api.session.verify = False
         api.login(user=cbis_zabbix_username, password=cbis_zabbix_password)
 
@@ -72,8 +80,6 @@ class ZabbixCollector(object):
 
         host_ids = []
         host_data = {}
-
-        output_records = []
 
         for host in hosts:
             host_id = host['hostid']
@@ -104,7 +110,8 @@ class ZabbixCollector(object):
         # 4 - text.
 
         now = time.time()
-        while cbis_zabbix_last_sync < now:
+        time_till = int(cbis_zabbix_last_sync) + 60 * self._period_data
+        while cbis_zabbix_last_sync < now and time_till < now:
             history_objects = []
             time_till = int(cbis_zabbix_last_sync) + 60 * self._period_data
             for item_type in items_id_from_type:
@@ -119,9 +126,8 @@ class ZabbixCollector(object):
                                                        time_till=time_till,
                                                        sortfield=['itemid', 'clock']))
 
-            # aggregate per period_data
-            current_item_id = None
-            item_values = []
+            # raw records
+            row_records = []
 
             # add time_till as the sync point of time
             all_clock_timestamp = [time_till]
@@ -130,100 +136,184 @@ class ZabbixCollector(object):
                 item_id = history['itemid']
                 item = items_data[item_id]
                 value = history['value']
+                clock = history['clock']
 
                 all_clock_timestamp.append(float(history['clock']))
 
-                if item_id != current_item_id:
-                    if len(item_values) > 0:
-                        output_records.extend(
-                            self._aggregate_data(items_data[current_item_id], item_values, time_till, cbis_pod_id))
-                    current_item_id = item_id
-                    item_values = []
+                item_value_type = item['value_type']
 
-                item_values.append(value)
+                row_records.append({'cbis_pod_id': cbis_pod_id,
+                                    'hostname': item['hostname'],
+                                    'item_key': item['key_'],
+                                    'item_value': value,
+                                    'item_unit': item['units'],
+                                    'clock': clock})
 
-            if len(item_values) > 0:
-                output_records.extend(
-                    self._aggregate_data(items_data[current_item_id], item_values, time_till, cbis_pod_id))
+                if len(row_records) > 10000:
+                    self._save_raw(row_records)
+                    row_records = []
+
+            if len(row_records) > 0:
+                self._save_raw(row_records)
+                row_records = []
 
             # mark last sync time
             if len(all_clock_timestamp) > 0:
                 cbis_zabbix_last_sync = max(all_clock_timestamp)
 
-            if len(output_records) > 1000:
-                # same object
-                self._save_aggregate_data(output_records)
-                output_records = []
-
-        if len(output_records) > 0:
-            # same object
-            self._save_aggregate_data(output_records)
-            output_records = []
         return cbis_zabbix_last_sync
 
-    def _save_aggregate_data(self, records):
+    def _save_raw(self, records):
         conn = self._conn
 
         curr = conn.cursor()
 
         curr.executemany(
-            'INSERT INTO cbis_zabbix_raw (cbis_pod_id, hostname, item_key, item_value, item_unit, item_type, clock) '
-            'VALUES (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_value)s, %(item_unit)s, %(item_type)s, %(clock)s)',
+            'INSERT INTO cbis_zabbix_raw (cbis_pod_id, hostname, item_key, item_value, item_unit, clock) '
+            'VALUES (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_value)s, %(item_unit)s, %(clock)s)',
             records)
 
         curr.close()
 
-    @staticmethod
-    def _aggregate_data(item, history_values, clock, cbis_pod_id):
-        output_records = []
+    def aggregate_hourly(self, now=time.time()):
+        last_hour = datetime.fromtimestamp(now).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
+        current_hour = last_hour + timedelta(hours=1)
 
-        item_value_type = item['value_type']
-        if item_value_type in ['0', '3']:
-            values = [float(value) for value in history_values]
+        sql = 'select cbis_pod_id, hostname, item_key, item_unit, max(item_value), min(item_value), avg(item_value) from cbis_zabbix_raw ' \
+              'where clock >= %(from_date)s and clock < %(to_date)s ' \
+              'group by cbis_pod_id, hostname, item_key, item_unit'
 
-            max_value = max(values)
-            min_value = min(values)
-            avg_value = sum(values) / len(values)
+        params = {'from_date': last_hour.strftime('%s'),
+                  'to_date': current_hour.strftime('%s')}
 
-            output_records.append({'cbis_pod_id': cbis_pod_id,
-                                   'clock': clock,
-                                   'hostname': item['hostname'],
-                                   'item_key': item['key_'],
-                                   'item_value': max_value,
-                                   'item_unit': item['units'],
-                                   'item_type': 'max'})
+        self.log.info('Aggregate Hourly from %s to %s' %
+                      (last_hour.strftime('%Y-%m-%d %H:%M:%S'), current_hour.strftime('%Y-%m-%d %H:%M:%S')))
 
-            output_records.append({'cbis_pod_id': cbis_pod_id,
-                                   'clock': clock,
-                                   'hostname': item['hostname'],
-                                   'item_key': item['key_'],
-                                   'item_value': min_value,
-                                   'item_unit': item['units'],
-                                   'item_type': 'min'})
+        with util.DBConnection().get_connection() as conn:
 
-            output_records.append({'cbis_pod_id': cbis_pod_id,
-                                   'clock': clock,
-                                   'hostname': item['hostname'],
-                                   'item_key': item['key_'],
-                                   'item_value': avg_value,
-                                   'item_unit': item['units'],
-                                   'item_type': 'avg'})
-        else:
-            values = [str(value) for value in history_values]
+            curr = conn.cursor()
 
-            output_records.append({'cbis_pod_id': cbis_pod_id,
-                                   'clock': clock,
-                                   'hostname': item['hostname'],
-                                   'item_key': item['key_'],
-                                   'item_value': values[0],
-                                   'item_unit': item['units'],
-                                   'item_type': 'str'})
+            curr.execute(sql, params)
 
-        return output_records
+            hourly_records = []
+            for (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value) in curr:
+                hourly_records.append({'cbis_pod_id':cbis_pod_id,
+                                       'hostname': hostname,
+                                       'item_key': item_key,
+                                       'item_unit': item_unit,
+                                       'max_value': max_value,
+                                       'min_value': min_value,
+                                       'avg_value': avg_value,
+                                       'clock': params['to_date']})
+
+            #delete data
+            delete_sql = 'delete from cbis_zabbix_hour where clock = %(clock)s'
+            curr.execute(delete_sql, {'clock': params['to_date']})
+
+            insert_sql = 'insert into cbis_zabbix_hour (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value, clock) ' \
+                         'values (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_unit)s, %(max_value)s, %(min_value)s, %(avg_value)s, %(clock)s)'
+
+            curr.executemany(insert_sql, hourly_records)
+
+            curr.close()
+
+            conn.commit()
+
+    def aggregate_daily(self, now=time.time()):
+        yesterday = datetime.fromtimestamp(now).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        today = yesterday + timedelta(days=1)
+
+        sql = 'select cbis_pod_id, hostname, item_key, item_unit, max(max_value), min(min_value), avg(avg_value) from cbis_zabbix_hour ' \
+              'where clock >= %(from_date)s and clock < %(to_date)s ' \
+              'group by cbis_pod_id, hostname, item_key, item_unit'
+
+        params = {'from_date': yesterday.strftime('%s'),
+                  'to_date': today.strftime('%s')}
+
+        self.log.info('Aggregate Daily from %s to %s' %
+                      (yesterday.strftime('%Y-%m-%d %H:%M:%S'),today.strftime('%Y-%m-%d %H:%M:%S')))
+
+        with util.DBConnection().get_connection() as conn:
+
+            curr = conn.cursor()
+
+            curr.execute(sql, params)
+
+            daily_records = []
+            for (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value) in curr:
+                daily_records.append({'cbis_pod_id':cbis_pod_id,
+                                      'hostname': hostname,
+                                      'item_key': item_key,
+                                      'item_unit': item_unit,
+                                      'max_value': max_value,
+                                      'min_value': min_value,
+                                      'avg_value': avg_value,
+                                      'clock': params['to_date']})
+
+            #delete data
+            delete_sql = 'delete from cbis_zabbix_day where clock = %(clock)s'
+            curr.execute(delete_sql, {'clock': params['to_date']})
+
+            insert_sql = 'insert into cbis_zabbix_day (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value, clock) ' \
+                         'values (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_unit)s, %(max_value)s, %(min_value)s, %(avg_value)s, %(clock)s)'
+
+            curr.executemany(insert_sql, daily_records)
+
+            curr.close()
+
+            conn.commit()
+
+    # @staticmethod
+    # def _aggregate_data(item, history_values, clock, cbis_pod_id):
+    #     output_records = []
+    #
+    #     item_value_type = item['value_type']
+    #     if item_value_type in ['0', '3']:
+    #         values = [float(value) for value in history_values]
+    #
+    #         max_value = max(values)
+    #         min_value = min(values)
+    #         avg_value = sum(values) / len(values)
+    #
+    #         output_records.append({'cbis_pod_id': cbis_pod_id,
+    #                                'clock': clock,
+    #                                'hostname': item['hostname'],
+    #                                'item_key': item['key_'],
+    #                                'item_value': max_value,
+    #                                'item_unit': item['units'],
+    #                                'item_type': 'max'})
+    #
+    #         output_records.append({'cbis_pod_id': cbis_pod_id,
+    #                                'clock': clock,
+    #                                'hostname': item['hostname'],
+    #                                'item_key': item['key_'],
+    #                                'item_value': min_value,
+    #                                'item_unit': item['units'],
+    #                                'item_type': 'min'})
+    #
+    #         output_records.append({'cbis_pod_id': cbis_pod_id,
+    #                                'clock': clock,
+    #                                'hostname': item['hostname'],
+    #                                'item_key': item['key_'],
+    #                                'item_value': avg_value,
+    #                                'item_unit': item['units'],
+    #                                'item_type': 'avg'})
+    #     else:
+    #         values = [str(value) for value in history_values]
+    #
+    #         output_records.append({'cbis_pod_id': cbis_pod_id,
+    #                                'clock': clock,
+    #                                'hostname': item['hostname'],
+    #                                'item_key': item['key_'],
+    #                                'item_value': values[0],
+    #                                'item_unit': item['units'],
+    #                                'item_type': 'str'})
+    #
+    #     return output_records
 
 
 if __name__ == '__main__':
     PATH = os.path.dirname(os.path.abspath(__file__))
     logging.config.fileConfig(os.path.join(PATH, 'logging.ini'))
     client = ZabbixCollector()
-    client.collect()
+    client.aggregate_daily(now=float((datetime.now() + timedelta(days=1)).strftime('%s')))
