@@ -1,0 +1,7 @@
+venv
+dist
+MANIFEST
+.idea
+*.egg-info
+VERSION
+target

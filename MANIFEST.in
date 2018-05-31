@@ -1,0 +1,13 @@
+# Include the README
+include *.md
+
+# Include the license file
+include LICENSE.txt
+include requirements.txt
+include VERSION
+
+include make.py
+
+recursive-exclude __pycache__  *.pyc *.pyo *.orig
+exclude *.git*
+
