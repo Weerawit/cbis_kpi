@@ -316,4 +316,5 @@ if __name__ == '__main__':
     PATH = os.path.dirname(os.path.abspath(__file__))
     logging.config.fileConfig(os.path.join(PATH, 'logging.ini'))
     client = ZabbixCollector()
-    client.aggregate_daily(now=float((datetime.now() + timedelta(days=1)).strftime('%s')))
+    client.collect()
+    # client.aggregate_daily(now=float((datetime.now() + timedelta(days=1)).strftime('%s')))
