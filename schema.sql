@@ -124,18 +124,23 @@ values('1','test_pod', 'localhost', 'stack', UNIX_TIMESTAMP(now()), 'http://10.2
 
 
 CREATE TABLE `cbis_zabbix_raw` (
-    `cbis_zabbix_raw_id`        bigint unsigned PRIMARY KEY AUTO_INCREMENT,
+    `cbis_zabbix_raw_id`        bigint unsigned AUTO_INCREMENT,
 	`cbis_pod_id`               bigint unsigned                           NOT NULL,
 	`hostname`                  varchar(128)    DEFAULT ''                NOT NULL,
 	`item_key`                  varchar(255)    DEFAULT ''                NOT NULL,
 	`item_value`                varchar(255)    DEFAULT ''                NOT NULL,
 	`item_unit`                 varchar(255)    DEFAULT ''                NOT NULL,
-	`clock`                     decimal         DEFAULT '0'               NOT NULL
-) ENGINE=InnoDB;
-CREATE INDEX `cbis_zabbix_raw_1` ON `cbis_zabbix_raw` (`cbis_pod_id`,`hostname`, `clock`);
+	`clock`                     bigint unsigned DEFAULT '0'               NOT NULL,
+    UNIQUE KEY `cbis_zabbix_raw_id` (`cbis_zabbix_raw_id`, `clock`)
+
+) ENGINE=InnoDB PARTITION BY RANGE (clock) (
+    PARTITION p_0 VALUES LESS THAN (0)
+);
+
+CREATE INDEX `cbis_zabbix_raw_1` ON `cbis_zabbix_raw` (`cbis_pod_id`, `hostname`, `item_key`, `item_unit`, `clock`);
 
 CREATE TABLE `cbis_zabbix_hour` (
-    `cbis_zabbix_hour_id`        bigint unsigned PRIMARY KEY AUTO_INCREMENT,
+    `cbis_zabbix_hour_id`       bigint unsigned AUTO_INCREMENT,
 	`cbis_pod_id`               bigint unsigned                           NOT NULL,
 	`hostname`                  varchar(128)    DEFAULT ''                NOT NULL,
 	`item_key`                  varchar(255)    DEFAULT ''                NOT NULL,
@@ -143,13 +148,17 @@ CREATE TABLE `cbis_zabbix_hour` (
 	`min_value`                 varchar(255)    DEFAULT ''                NOT NULL,
 	`avg_value`                 varchar(255)    DEFAULT ''                NOT NULL,
 	`item_unit`                 varchar(255)    DEFAULT ''                NOT NULL,
-	`clock`                     decimal         DEFAULT '0'               NOT NULL
-) ENGINE=InnoDB;
-CREATE INDEX `cbis_zabbix_hour_1` ON `cbis_zabbix_hour` (`cbis_pod_id`,`hostname`, `clock`);
+	`clock`                     bigint unsigned DEFAULT '0'               NOT NULL,
+	UNIQUE KEY `cbis_zabbix_hour_id` (`cbis_zabbix_hour_id`, `clock`)
+) ENGINE=InnoDB PARTITION BY RANGE (clock) (
+    PARTITION p_0 VALUES LESS THAN (0)
+);
+
+CREATE INDEX `cbis_zabbix_hour_1` ON `cbis_zabbix_hour` (`cbis_pod_id`, `hostname`, `item_key`, `item_unit`, `clock`);
 
 
 CREATE TABLE `cbis_zabbix_day` (
-    `cbis_zabbix_day_id`        bigint unsigned PRIMARY KEY AUTO_INCREMENT,
+    `cbis_zabbix_day_id`        bigint unsigned AUTO_INCREMENT,
 	`cbis_pod_id`               bigint unsigned                           NOT NULL,
 	`hostname`                  varchar(128)    DEFAULT ''                NOT NULL,
 	`item_key`                  varchar(255)    DEFAULT ''                NOT NULL,
@@ -157,9 +166,13 @@ CREATE TABLE `cbis_zabbix_day` (
 	`min_value`                 varchar(255)    DEFAULT ''                NOT NULL,
 	`avg_value`                 varchar(255)    DEFAULT ''                NOT NULL,
 	`item_unit`                 varchar(255)    DEFAULT ''                NOT NULL,
-	`clock`                     decimal         DEFAULT '0'               NOT NULL
-) ENGINE=InnoDB;
-CREATE INDEX `cbis_zabbix_day_1` ON `cbis_zabbix_day` (`cbis_pod_id`,`hostname`, `clock`);
+	`clock`                     bigint unsigned DEFAULT '0'               NOT NULL,
+	UNIQUE KEY `cbis_zabbix_hour_id` (`cbis_zabbix_day_id`, `clock`)
+) ENGINE=InnoDB PARTITION BY RANGE (clock) (
+    PARTITION p_0 VALUES LESS THAN (0)
+);
+
+CREATE INDEX `cbis_zabbix_day_1` ON `cbis_zabbix_day` (`cbis_pod_id`, `hostname`, `item_key`, `item_unit`, `clock`);
 
 
 CREATE TABLE `cbis_virsh_list` (
@@ -171,43 +184,52 @@ CREATE TABLE `cbis_virsh_list` (
 	`vm_flavor`                 varchar(128)    DEFAULT ''                NOT NULL,
 	`vm_vcpu`                   varchar(128)    DEFAULT ''                NOT NULL,
 	`vm_memory`                 varchar(128)    DEFAULT ''                NOT NULL,
-	`vm_numa`                   varchar(128)    DEFAULT ''                NOT NULL,
+	`vm_numa`                   varchar(128)    DEFAULT ''                NOT NULL
 ) ENGINE=InnoDB;
 CREATE INDEX `cbis_virsh_list_1` ON `cbis_virsh_list` (`cbis_pod_id`,`hostname`, `domain_name`);
 
 
 CREATE TABLE `cbis_virsh_stat_raw` (
-    `cbis_virsh_stat_raw_id`    bigint unsigned PRIMARY KEY AUTO_INCREMENT,
+    `cbis_virsh_stat_raw_id`    bigint unsigned  AUTO_INCREMENT,
 	`cbis_pod_id`               bigint unsigned                           NOT NULL,
 	`domain_name`               varchar(128)    DEFAULT ''                NOT NULL,
 	`item_key`                  varchar(255)    DEFAULT ''                NOT NULL,
 	`item_value`                varchar(255)    DEFAULT ''                NOT NULL,
 	`item_delta`                varchar(255)    DEFAULT ''                NOT NULL,
-	`clock`                     decimal         DEFAULT '0'               NOT NULL
-) ENGINE=InnoDB;
-CREATE INDEX `cbis_virsh_stat_raw_1` ON `cbis_virsh_stat_raw` (`cbis_pod_id`,`domain_name`, `clock`);
+	`clock`                     bigint unsigned DEFAULT '0'               NOT NULL,
+	UNIQUE KEY `cbis_virsh_stat_raw_id` (`cbis_virsh_stat_raw_id`, `clock`)
+) ENGINE=InnoDB PARTITION BY RANGE (clock) (
+    PARTITION p_0 VALUES LESS THAN (0)
+);
+CREATE INDEX `cbis_virsh_stat_raw_1` ON `cbis_virsh_stat_raw` (`cbis_pod_id`, `domain_name`, `item_key`, `clock`);
 
 
 CREATE TABLE `cbis_virsh_stat_hour` (
-    `cbis_virsh_stat_hour_id`    bigint unsigned PRIMARY KEY AUTO_INCREMENT,
+    `cbis_virsh_stat_hour_id`   bigint unsigned AUTO_INCREMENT,
 	`cbis_pod_id`               bigint unsigned                           NOT NULL,
 	`domain_name`               varchar(128)    DEFAULT ''                NOT NULL,
 	`item_key`                  varchar(255)    DEFAULT ''                NOT NULL,
 	`max_value`                 varchar(255)    DEFAULT ''                NOT NULL,
 	`min_value`                 varchar(255)    DEFAULT ''                NOT NULL,
 	`avg_value`                 varchar(255)    DEFAULT ''                NOT NULL,
-	`clock`                     decimal         DEFAULT '0'               NOT NULL
-) ENGINE=InnoDB;
-CREATE INDEX `cbis_virsh_stat_hour_1` ON `cbis_virsh_stat_hour` (`cbis_pod_id`,`domain_name`, `clock`);
+	`clock`                     bigint unsigned DEFAULT '0'               NOT NULL,
+	UNIQUE KEY `cbis_virsh_stat_hour_id` (`cbis_virsh_stat_hour_id`, `clock`)
+) ENGINE=InnoDB PARTITION BY RANGE (clock) (
+    PARTITION p_0 VALUES LESS THAN (0)
+);
+CREATE INDEX `cbis_virsh_stat_hour_1` ON `cbis_virsh_stat_hour` (`cbis_pod_id`, `domain_name`, `item_key`, `clock`);
 
 CREATE TABLE `cbis_virsh_stat_day` (
-    `cbis_virsh_stat_day_id`    bigint unsigned PRIMARY KEY AUTO_INCREMENT,
+    `cbis_virsh_stat_day_id`    bigint unsigned AUTO_INCREMENT,
 	`cbis_pod_id`               bigint unsigned                           NOT NULL,
 	`domain_name`               varchar(128)    DEFAULT ''                NOT NULL,
 	`item_key`                  varchar(255)    DEFAULT ''                NOT NULL,
 	`max_value`                 varchar(255)    DEFAULT ''                NOT NULL,
 	`min_value`                 varchar(255)    DEFAULT ''                NOT NULL,
 	`avg_value`                 varchar(255)    DEFAULT ''                NOT NULL,
-	`clock`                     decimal         DEFAULT '0'               NOT NULL
-) ENGINE=InnoDB;
-CREATE INDEX `cbis_virsh_stat_day_1` ON `cbis_virsh_stat_day` (`cbis_pod_id`,`domain_name`, `clock`);
+	`clock`                     bigint unsigned DEFAULT '0'               NOT NULL,
+	UNIQUE KEY `cbis_virsh_stat_day_id` (`cbis_virsh_stat_day_id`, `clock`)
+) ENGINE=InnoDB PARTITION BY RANGE (clock) (
+    PARTITION p_0 VALUES LESS THAN (0)
+);
+CREATE INDEX `cbis_virsh_stat_day_1` ON `cbis_virsh_stat_day` (`cbis_pod_id`, `domain_name`, `item_key`, `clock`);
