@@ -104,7 +104,7 @@ class ZabbixCollector(object):
             curr.close()
 
     def _collect_pod(self, cbis_pod_id, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
-                     cbis_zabbix_last_sync):
+                     cbis_zabbix_last_sync, sync_time_till=time.time()):
 
         self.log.info('connecting to zabbix url : %s' % (cbis_zabbix_url,))
 
@@ -146,10 +146,9 @@ class ZabbixCollector(object):
         # 3 - numeric unsigned;
         # 4 - text.
 
-        now = time.time()
         time_till = int(cbis_zabbix_last_sync) + 60 * self._period_data
         has_some_collected = False
-        while cbis_zabbix_last_sync < now and time_till < now:
+        while cbis_zabbix_last_sync < sync_time_till and time_till < sync_time_till:
             has_some_collected = True
             history_objects = []
             time_till = int(cbis_zabbix_last_sync) + 60 * self._period_data
@@ -160,11 +159,17 @@ class ZabbixCollector(object):
                     item_type))
 
                 for items_id_by_chunk in chunks(items_id_from_type[item_type], 100):
-                    history_objects.extend(api.history.get(itemids=items_id_by_chunk,
-                                                           history=item_type,
-                                                           time_from=int(cbis_zabbix_last_sync),
-                                                           time_till=time_till,
-                                                           sortfield=['itemid', 'clock']))
+                    for i in range(4):
+                        try:
+                            history_objects.extend(api.history.get(itemids=items_id_by_chunk,
+                                                                   history=item_type,
+                                                                   time_from=int(cbis_zabbix_last_sync),
+                                                                   time_till=time_till,
+                                                                   sortfield=['itemid', 'clock']))
+                            break
+                        except:
+                            self.log.exception('error getting history, retrying for %s' % (i,))
+
 
             # raw records
             row_records = []
