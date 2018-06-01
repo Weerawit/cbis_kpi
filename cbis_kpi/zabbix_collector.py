@@ -9,6 +9,10 @@ import collections
 from datetime import timedelta, datetime
 import util
 
+def chunks(l, n):
+    """Yield successive n-sized chunks from l."""
+    for i in xrange(0, len(l), n):
+        yield l[i:i + n]
 
 class ZabbixCollector(object):
 
@@ -144,7 +148,9 @@ class ZabbixCollector(object):
 
         now = time.time()
         time_till = int(cbis_zabbix_last_sync) + 60 * self._period_data
+        has_some_collected = False
         while cbis_zabbix_last_sync < now and time_till < now:
+            has_some_collected = True
             history_objects = []
             time_till = int(cbis_zabbix_last_sync) + 60 * self._period_data
             for item_type in items_id_from_type:
@@ -153,11 +159,12 @@ class ZabbixCollector(object):
                     time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time_till)),
                     item_type))
 
-                history_objects.extend(api.history.get(itemids=items_id_from_type[item_type],
-                                                       history=item_type,
-                                                       time_from=int(cbis_zabbix_last_sync),
-                                                       time_till=time_till,
-                                                       sortfield=['itemid', 'clock']))
+                for items_id_by_chunk in chunks(items_id_from_type[item_type], 100):
+                    history_objects.extend(api.history.get(itemids=items_id_by_chunk,
+                                                           history=item_type,
+                                                           time_from=int(cbis_zabbix_last_sync),
+                                                           time_till=time_till,
+                                                           sortfield=['itemid', 'clock']))
 
             # raw records
             row_records = []
@@ -194,7 +201,7 @@ class ZabbixCollector(object):
             if len(all_clock_timestamp) > 0:
                 cbis_zabbix_last_sync = max(all_clock_timestamp)
 
-        else:
+        if not has_some_collected:
             self.log.info('Nothing to collect since current period not full period yet. ')
 
         return cbis_zabbix_last_sync
