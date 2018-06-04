@@ -304,7 +304,9 @@ class VirshCollector(object):
             insert_sql = 'insert into cbis_virsh_stat_hour (cbis_pod_id, domain_name, item_key, max_value, min_value, avg_value, clock) ' \
                          'values (%(cbis_pod_id)s, %(domain_name)s, %(item_key)s, %(max_value)s, %(min_value)s, %(avg_value)s, %(clock)s)'
 
-            curr.executemany(insert_sql, hourly_records)
+            for records in util.chunks(hourly_records, 10000):
+
+                curr.executemany(insert_sql, records)
 
             curr.close()
 
@@ -347,7 +349,9 @@ class VirshCollector(object):
             insert_sql = 'insert into cbis_virsh_stat_day (cbis_pod_id, domain_name, item_key, max_value, min_value, avg_value, clock) ' \
                          'values (%(cbis_pod_id)s, %(domain_name)s, %(item_key)s, %(max_value)s, %(min_value)s, %(avg_value)s, %(clock)s)'
 
-            curr.executemany(insert_sql, daily_records)
+            for records in util.chunks(daily_records, 10000):
+
+                curr.executemany(insert_sql, records)
 
             curr.close()
 

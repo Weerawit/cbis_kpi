@@ -9,10 +9,6 @@ import collections
 from datetime import timedelta, datetime
 import util
 
-def chunks(l, n):
-    """Yield successive n-sized chunks from l."""
-    for i in xrange(0, len(l), n):
-        yield l[i:i + n]
 
 class ZabbixCollector(object):
 
@@ -158,7 +154,7 @@ class ZabbixCollector(object):
                     time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time_till)),
                     item_type))
 
-                for items_id_by_chunk in chunks(items_id_from_type[item_type], 100):
+                for items_id_by_chunk in util.chunks(items_id_from_type[item_type], 100):
                     for i in range(4):
                         try:
                             history_objects.extend(api.history.get(itemids=items_id_by_chunk,
@@ -261,7 +257,9 @@ class ZabbixCollector(object):
             insert_sql = 'insert into cbis_zabbix_hour (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value, clock) ' \
                          'values (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_unit)s, %(max_value)s, %(min_value)s, %(avg_value)s, %(clock)s)'
 
-            curr.executemany(insert_sql, hourly_records)
+            for records in util.chunks(hourly_records, 10000):
+
+                curr.executemany(insert_sql, records)
 
             curr.close()
 
@@ -305,7 +303,9 @@ class ZabbixCollector(object):
             insert_sql = 'insert into cbis_zabbix_day (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value, clock) ' \
                          'values (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_unit)s, %(max_value)s, %(min_value)s, %(avg_value)s, %(clock)s)'
 
-            curr.executemany(insert_sql, daily_records)
+            for records in util.chunks(daily_records, 10000):
+
+                curr.executemany(insert_sql, records)
 
             curr.close()
 

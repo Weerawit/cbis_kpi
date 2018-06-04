@@ -55,7 +55,7 @@ def main(args=sys.argv[1:]):
 
         if not aggregate_type or 'DAY' in aggregate_type or 'ALL' in aggregate_type:
             try:
-                if now.hour == 1 or 'DAY' in aggregate_type:
+                if now.hour == 1 or (aggregate_type and ('DAY' in aggregate_type or 'ALL' in aggregate_type)):
                     start_time = time.time()
                     zabbix.aggregate_daily(now=float(now.strftime('%s')))
                     log.info('zabbix aggregate_daily took %s seconds' % (time.time() - start_time))
@@ -89,7 +89,7 @@ def main(args=sys.argv[1:]):
 
         if not aggregate_type or 'DAY' in aggregate_type or 'ALL' in aggregate_type:
             try:
-                if now.hour == 1 or 'DAY' in aggregate_type or 'ALL' in aggregate_type:
+                if now.hour == 1 or (aggregate_type and ('DAY' in aggregate_type or 'ALL' in aggregate_type)):
                     start_time = time.time()
                     virsh.aggregate_daily(now=float(now.strftime('%s')))
                     log.info('virsh aggregate_daily took %s seconds' % (time.time() - start_time))

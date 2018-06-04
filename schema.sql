@@ -1,6 +1,8 @@
 create database cbis_kpi character set utf8 collate utf8_bin;
 grant all privileges on cbis_kpi.* to cbis_kpi@localhost identified by 'cbis_kpi';
 
+use cbis_kpi;
+
 CREATE TABLE `config` (
     `config_key`       varchar(128)    DEFAULT ''                NOT NULL,
     `config_value`     varchar(128)    DEFAULT ''                NOT NULL
@@ -120,8 +122,7 @@ CREATE TABLE `cbis_pod` (
 CREATE INDEX `cbis_pod_1` ON `cbis_pod` (`cbis_pod_name`,`enable`);
 
 insert into cbis_pod (cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username, cbis_undercloud_last_sync, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password, cbis_zabbix_last_sync, enable)
-values('1','test_pod', 'localhost', 'stack', UNIX_TIMESTAMP(now()), 'http://10.211.55.25/zabbix', 'metrics-exporter', 'zabbix', UNIX_TIMESTAMP(now()), '0');
-
+values('1','test_pod', 'localhost', 'stack', TRUNCATE(UNIX_TIMESTAMP(NOW()) / 900,0)*900, 'http://10.211.55.25/zabbix', 'metrics-exporter', 'zabbix', UNIX_TIMESTAMP(now()), '0');
 
 CREATE TABLE `cbis_zabbix_raw` (
     `cbis_zabbix_raw_id`        bigint unsigned AUTO_INCREMENT,

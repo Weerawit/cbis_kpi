@@ -1,5 +1,3 @@
 pyzabbix>=0.7.4
-#SQLAlchemy>=1.2.7
-#uWSGI>=2.0.17
 mysql-connector-python>=8.0.11
 
