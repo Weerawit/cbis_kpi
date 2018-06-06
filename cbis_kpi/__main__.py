@@ -6,8 +6,7 @@ import threading
 import time
 import argparse
 from datetime import datetime
-from zabbix_collector import ZabbixCollector
-from virsh_collector import VirshCollector
+import kpicollector
 
 
 def main(args=sys.argv[1:]):
@@ -26,8 +25,8 @@ def main(args=sys.argv[1:]):
 
     aggregate_type = args.aggregate_type
 
-    zabbix = ZabbixCollector()
-    virsh = VirshCollector()
+    zabbix = kpicollector.ZabbixCollector()
+    virsh = kpicollector.VirshCollector()
 
     def zabbix_thread():
         if not aggregate_type:
