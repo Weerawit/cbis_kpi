@@ -27,6 +27,16 @@ def main(args=sys.argv[1:]):
 
     zabbix = kpicollector.ZabbixCollector()
     virsh = kpicollector.VirshCollector()
+    cephdisk = kpicollector.CephDiskCollect()
+
+    def cephdisk_thread():
+        if not aggregate_type:
+            try:
+                start_time = time.time()
+                cephdisk.collect()
+                log.info('cephdisk collect took %s seconds' % (time.time() - start_time))
+            except:
+                log.exception('error in cephdisk collect')
 
     def zabbix_thread():
         if not aggregate_type:
@@ -95,7 +105,9 @@ def main(args=sys.argv[1:]):
             except:
                 log.exception('error in virsh aggregate_daily')
 
-    all_thread = [threading.Thread(target=zabbix_thread), threading.Thread(target=virsh_thread)]
+    all_thread = [threading.Thread(target=zabbix_thread),
+                  threading.Thread(target=virsh_thread),
+                  threading.Thread(target=cephdisk_thread)]
 
     for t in all_thread:
         t.start()

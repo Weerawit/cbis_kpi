@@ -660,8 +660,79 @@ class ZabbixCollector(object):
             conn.commit()
 
 
+class CephDiskCollect(object):
+
+    def __init__(self):
+        self.log = logging.getLogger(self.__class__.__name__)
+        self._config = util.Config()
+        self._conn = None
+
+    def collect(self):
+        self.log.info('Connecting to database')
+
+        with util.DBConnection().get_connection() as conn:
+
+            self._conn = conn
+
+            curr = conn.cursor()
+
+            curr.execute('select cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username '
+                         'from cbis_pod where enable=1')
+
+            for (cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username) in curr:
+                kwargs = {'cbis_pod_id': cbis_pod_id,
+                          'test_flag': False}
+
+                executor = util.SshExecutor(cbis_undercloud_addr, cbis_undercloud_username, **kwargs)
+
+                executor.run('cephstorage-*',
+                             'sudo ceph-disk list | grep osd',
+                             callback=self._callback_cephdisk)
+
+                conn.commit()
+
+            curr.close()
+
+    def _callback_cephdisk(self, hostname, line_each_node, **kwargs):
+        domain_name = None
+        cbis_pod_id = kwargs.get('cbis_pod_id')
+
+        ceph_list_recoreds = []
+        for line in line_each_node.splitlines():
+            if not line:
+                continue
+            else:
+                line = line.strip()
+                values = line.split(',')
+                disk = values[0].split()[0]
+                osd = values[3].strip()
+                journal = values[4].split()[1]
+                ceph_list_recoreds.append({'cbis_pod_id': cbis_pod_id,
+                                           'hostname': hostname,
+                                           'disk': disk,
+                                           'osd': osd,
+                                           'journal': journal})
+        conn = self._conn
+
+        curr = conn.cursor()
+
+        delete_sql = 'delete from cbis_ceph_disk where cbis_pod_id = %(cbis_pod_id)s and hostname = %(hostname)s'
+
+        curr.execute(delete_sql, {'cbis_pod_id': cbis_pod_id,
+                                  'hostname': hostname})
+
+        if len(ceph_list_recoreds) > 0:
+
+            insert_sql = 'insert into cbis_ceph_disk (cbis_pod_id, hostname, disk, journal, osd) ' \
+                         'values (%(cbis_pod_id)s, %(hostname)s, %(disk)s, %(journal)s, %(osd)s)'
+
+            curr.executemany(insert_sql, ceph_list_recoreds)
+
+            curr.close()
+
+
 if __name__ == '__main__':
     PATH = os.path.dirname(os.path.abspath(__file__))
     logging.config.fileConfig(os.path.join(PATH, 'logging.ini'))
-    client = VirshCollector()
+    client = CephDiskCollect()
     client.collect()

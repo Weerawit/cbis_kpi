@@ -177,7 +177,6 @@ CREATE INDEX `cbis_zabbix_day_1` ON `cbis_zabbix_day` (`cbis_pod_id`, `hostname`
 
 
 CREATE TABLE `cbis_virsh_list` (
-    `cbis_virsh_list_id`        bigint unsigned PRIMARY KEY AUTO_INCREMENT,
 	`cbis_pod_id`               bigint unsigned                           NOT NULL,
 	`hostname`                  varchar(128)    DEFAULT ''                NOT NULL,
 	`domain_name`               varchar(128)    DEFAULT ''                NOT NULL,
@@ -234,3 +233,12 @@ CREATE TABLE `cbis_virsh_stat_day` (
     PARTITION p_0 VALUES LESS THAN (0)
 );
 CREATE INDEX `cbis_virsh_stat_day_1` ON `cbis_virsh_stat_day` (`cbis_pod_id`, `domain_name`, `item_key`, `clock`);
+
+CREATE TABLE `cbis_ceph_disk` (
+	`cbis_pod_id`               bigint unsigned                           NOT NULL,
+	`hostname`                  varchar(128)    DEFAULT ''                NOT NULL,
+	`disk`                      varchar(128)    DEFAULT ''                NOT NULL,
+	`journal`                   varchar(128)    DEFAULT ''                NOT NULL,
+	`osd`                       varchar(128)    DEFAULT ''                NOT NULL
+) ENGINE=InnoDB;
+CREATE INDEX `cbis_ceph_disk_1` ON `cbis_ceph_disk` (`cbis_pod_id`,`hostname`);
