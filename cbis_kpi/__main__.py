@@ -131,8 +131,7 @@ def build_parser():
 
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description='Collect and aggregate KPI from Zabbix and virsh. '
-                    'Print CSV result to console')
+        description='Collect and aggregate KPI from Zabbix and virsh. ')
 
     parser.add_argument('--gtime',
                         help='Time to aggregate format DD-MM-YYYY HH:MM',
