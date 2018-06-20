@@ -179,6 +179,7 @@ CREATE INDEX `cbis_zabbix_day_1` ON `cbis_zabbix_day` (`cbis_pod_id`, `hostname`
 CREATE TABLE `cbis_virsh_list` (
 	`cbis_pod_id`               bigint unsigned                           NOT NULL,
 	`hostname`                  varchar(128)    DEFAULT ''                NOT NULL,
+	`project_name`              varchar(128)    DEFAULT ''                NOT NULL,
 	`domain_name`               varchar(128)    DEFAULT ''                NOT NULL,
 	`vm_name`                   varchar(128)    DEFAULT ''                NOT NULL,
 	`vm_flavor`                 varchar(128)    DEFAULT ''                NOT NULL,
@@ -187,6 +188,15 @@ CREATE TABLE `cbis_virsh_list` (
 	`vm_numa`                   varchar(128)    DEFAULT ''                NOT NULL
 ) ENGINE=InnoDB;
 CREATE INDEX `cbis_virsh_list_1` ON `cbis_virsh_list` (`cbis_pod_id`,`hostname`, `domain_name`);
+
+CREATE TABLE `cbis_virsh_meta` (
+	`cbis_pod_id`               bigint unsigned                           NOT NULL,
+	`hostname`                  varchar(128)    DEFAULT ''                NOT NULL,
+	`domain_name`               varchar(128)    DEFAULT ''                NOT NULL,
+	`meta_key`                  varchar(128)    DEFAULT ''                NOT NULL,
+	`meta_value`                varchar(128)    DEFAULT ''                NOT NULL
+) ENGINE=InnoDB;
+CREATE INDEX `cbis_virsh_meta_1` ON `cbis_virsh_meta` (`cbis_pod_id`,`hostname`, `domain_name`, `meta_key`);
 
 
 CREATE TABLE `cbis_virsh_stat_raw` (
@@ -197,6 +207,7 @@ CREATE TABLE `cbis_virsh_stat_raw` (
 	`item_value`                varchar(255)    DEFAULT ''                NOT NULL,
 	`item_delta`                varchar(255)    DEFAULT ''                NOT NULL,
 	`clock`                     bigint unsigned DEFAULT '0'               NOT NULL,
+	`clock_delta`               bigint unsigned DEFAULT '0'               NOT NULL,
 	UNIQUE KEY `cbis_virsh_stat_raw_id` (`cbis_virsh_stat_raw_id`, `clock`)
 ) ENGINE=InnoDB PARTITION BY RANGE (clock) (
     PARTITION p_0 VALUES LESS THAN (0)

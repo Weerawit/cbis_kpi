@@ -1,14 +1,17 @@
 from __future__ import print_function
 
-import logging
-import os
-import logging.config
-import time
 import collections
-import pyzabbix
-import util
+import logging
+import logging.config
+import os
+import time
 import xml.etree.ElementTree as ET
 from datetime import timedelta, datetime
+import re
+import pyzabbix
+import json
+
+import util
 
 
 class VirshCollector(object):
@@ -79,8 +82,12 @@ class VirshCollector(object):
                 executor = util.SshExecutor(cbis_undercloud_addr, cbis_undercloud_username, **kwargs)
 
                 executor.run('compute-*',
-                             'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh dumpxml \\\" \$2)}\"',
+                             'sudo ip link; sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh dumpxml \\\" \$2)}\"',
                              callback=self._callback_dumpxml)
+
+                executor.run('undercloud',
+                             'source /home/stack/overcloudrc;openstack project list -f json;nova list --all --fields host,name,instance_name,tenant_id',
+                             callback=self._callback_novalist)
 
                 executor.run('compute-*',
                              'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh domstats \\\" \$2)}\"',
@@ -92,12 +99,53 @@ class VirshCollector(object):
 
             curr.close()
 
+    def _callback_novalist(self, hostname, line_each_node, **kwargs):
+        cbis_pod_id = kwargs.get('cbis_pod_id')
+
+        records = []
+
+        lines = line_each_node.splitlines()
+        project_list = json.loads(lines[0])
+        i = 1
+        while i < len(lines):
+            line = lines[i]
+            i += 1
+            if 'overcloud-compute-' in line:
+                values = line.split('|')
+                domain_name = values[4].strip()
+                tenent_id = values[5].strip()
+                project_name = ''
+                for project in project_list:
+                    if tenent_id in project.get('ID'):
+                        project_name = project.get('Name')
+
+                records.append({'cbis_pod_id': cbis_pod_id,
+                                'project_name': project_name,
+                                'domain_name': domain_name})
+
+        conn = self._conn
+
+        curr = conn.cursor()
+
+        sql = 'update cbis_virsh_list set project_name = %(project_name)s where cbis_pod_id = %(cbis_pod_id)s and domain_name = %(domain_name)s'
+
+        curr.executemany(sql, records)
+
+        curr.close()
+
     def _callback_dumpxml(self, hostname, line_each_node, **kwargs):
         cbis_pod_id = kwargs.get('cbis_pod_id')
         virsh_list_records = []
         domain_xml = ""
         found_domain = False
-        for line in line_each_node.splitlines():
+        iplink_re = re.compile('^\d*:')
+        iplink_data = collections.defaultdict(list)
+        kwargs['iplink'] = iplink_data
+        i = 0
+        lines = line_each_node.splitlines()
+        while i < len(lines):
+            line = lines[i]
+            i += 1
             if not line:
                 continue
             if "<domain type='kvm'" in line:
@@ -111,6 +159,17 @@ class VirshCollector(object):
             elif found_domain:
                 if not line.isspace():
                     domain_xml += line
+            elif iplink_re.match(line):
+                if_name = line.split(':')[1].strip()
+                i += 1
+                line = lines[i]
+                try:
+                    while not iplink_re.match(line) and "<domain type='kvm'" not in line:
+                        iplink_data[if_name].append(line)
+                        i += 1
+                        line = lines[i]
+                except IndexError:
+                    pass
 
         conn = self._conn
 
@@ -121,14 +180,34 @@ class VirshCollector(object):
         curr.execute(delete_sql, {'cbis_pod_id': cbis_pod_id,
                                   'hostname': hostname})
 
+        delete_sql = 'delete from cbis_virsh_meta where cbis_pod_id = %(cbis_pod_id)s and hostname = %(hostname)s'
+
+        curr.execute(delete_sql, {'cbis_pod_id': cbis_pod_id,
+                                  'hostname': hostname})
+
+        #metadata for nic
+        meta_records = []
+        for virsh_list_record in virsh_list_records:
+            for nic in virsh_list_record.pop('physical_nic'):
+                meta_records.append({'cbis_pod_id': virsh_list_record.get('cbis_pod_id'),
+                                     'hostname': virsh_list_record.get('hostname'),
+                                     'domain_name': virsh_list_record.get('domain_name'),
+                                     'meta_key': 'nic',
+                                     'meta_value': nic})
+
         insert_sql = 'insert into cbis_virsh_list (cbis_pod_id, hostname, domain_name, vm_name, vm_flavor, vm_vcpu, vm_memory, vm_numa) ' \
                      'values (%(cbis_pod_id)s, %(hostname)s, %(domain_name)s, %(vm_name)s, %(vm_flavor)s, %(vm_vcpu)s, %(vm_memory)s, %(vm_numa)s)'
         curr.executemany(insert_sql, virsh_list_records)
+
+        insert_sql = 'insert into cbis_virsh_meta (cbis_pod_id, hostname, domain_name, meta_key, meta_value) ' \
+                     'values (%(cbis_pod_id)s, %(hostname)s, %(domain_name)s, %(meta_key)s, %(meta_value)s)'
+        curr.executemany(insert_sql, meta_records)
 
         curr.close()
 
     def _parse_xml(self, hostname, domain_xml, **kwargs):
         cbis_pod_id = kwargs.get('cbis_pod_id')
+        iplink_data = kwargs.get('iplink')
         ns = {'nova': 'http://openstack.org/xmlns/libvirt/nova/1.0'}
         root = ET.fromstring(domain_xml)
 
@@ -163,10 +242,19 @@ class VirshCollector(object):
             disk_size += "%s [%s] (%s) = %s\n" % (target_disk, writeback, size, rbd_disk)
 
         is_sriov = False
+        physical_card = []
         for interface_root in root.findall(".//interface"):
             if "hostdev" == interface_root.attrib['type']:
                 is_sriov = True
-                break
+                mac = interface_root.find('.//mac').attrib['address']
+
+                for key, values in list(iplink_data.items()):
+                    for value in values:
+                        if mac in value:
+                            physical_card.append(key)
+            else:
+                target_dev = interface_root.find('.//target').attrib['dev']
+                physical_card.append(target_dev)
 
         return {'cbis_pod_id': cbis_pod_id,
                 'hostname': hostname,
@@ -179,12 +267,14 @@ class VirshCollector(object):
                 'cpupin': cpupin,
                 'disk_size': disk_size,
                 'is_sriov': is_sriov,
-                'has_writeback': has_writeback}
+                'has_writeback': has_writeback,
+                'physical_nic': physical_card}
 
     def _callback_stat(self, hostname, line_each_node, **kwargs):
         domain_name = None
         cbis_undercloud_last_sync = kwargs.get('cbis_undercloud_last_sync')
         cbis_undercloud_current_sync = kwargs.get('cbis_undercloud_current_sync')
+        clock_delta = long(cbis_undercloud_current_sync) - long(cbis_undercloud_last_sync)
         cbis_pod_id = kwargs.get('cbis_pod_id')
 
         data_dict = collections.defaultdict(dict)
@@ -242,7 +332,8 @@ class VirshCollector(object):
                                                        'item_key': item_key,
                                                        'item_value': item_value,
                                                        'item_delta': item_value,
-                                                       'clock': cbis_undercloud_current_sync
+                                                       'clock': cbis_undercloud_current_sync,
+                                                       'clock_delta': clock_delta
                                                       })
 
                 else:
@@ -258,11 +349,12 @@ class VirshCollector(object):
                                                        'item_key': item_key,
                                                        'item_value': item_value,
                                                        'item_delta': delta_value,
-                                                       'clock': cbis_undercloud_current_sync
+                                                       'clock': cbis_undercloud_current_sync,
+                                                       'clock_delta': clock_delta
                                                       })
 
-        insert_sql = 'insert into cbis_virsh_stat_raw (cbis_pod_id, domain_name, item_key, item_value, item_delta, clock) ' \
-                     'values (%(cbis_pod_id)s, %(domain_name)s, %(item_key)s, %(item_value)s, %(item_delta)s, %(clock)s)'
+        insert_sql = 'insert into cbis_virsh_stat_raw (cbis_pod_id, domain_name, item_key, item_value, item_delta, clock, clock_delta) ' \
+                     'values (%(cbis_pod_id)s, %(domain_name)s, %(item_key)s, %(item_value)s, %(item_delta)s, %(clock)s, %(clock_delta)s)'
         curr.executemany(insert_sql, cbis_virsh_stat_raw_values)
 
         curr.close()
@@ -734,5 +826,6 @@ class CephDiskCollect(object):
 if __name__ == '__main__':
     PATH = os.path.dirname(os.path.abspath(__file__))
     logging.config.fileConfig(os.path.join(PATH, 'logging.ini'))
-    client = CephDiskCollect()
+    client = VirshCollector()
+    client.partition()
     client.collect()
