@@ -93,6 +93,10 @@ class VirshCollector(object):
                              'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh domstats \\\" \$2)}\"',
                              callback=self._callback_stat)
 
+                executor.run('compute-*',
+                             'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ print \\\"Domain: \\\" \$2; system(\\\"sudo virsh dommemstat \\\" \$2)}\"',
+                             callback=self._callback_memstat)
+
                 curr.execute('update cbis_pod set cbis_undercloud_last_sync = %s where cbis_pod_id = %s',
                              (cbis_undercloud_current_sync, cbis_pod_id))
                 conn.commit()
@@ -358,6 +362,79 @@ class VirshCollector(object):
         curr.executemany(insert_sql, cbis_virsh_stat_raw_values)
 
         curr.close()
+
+    def _callback_memstat(self, hostname, line_each_node, **kwargs):
+        domain_name = None
+        cbis_undercloud_last_sync = kwargs.get('cbis_undercloud_last_sync')
+        cbis_undercloud_current_sync = kwargs.get('cbis_undercloud_current_sync')
+        clock_delta = long(cbis_undercloud_current_sync) - long(cbis_undercloud_last_sync)
+        cbis_pod_id = kwargs.get('cbis_pod_id')
+
+        data_dict = collections.defaultdict(dict)
+
+        for line in line_each_node.splitlines():
+            if not line:
+                continue
+            if 'Domain:' in line:
+                domain_name = line.split(':')[1].strip()
+            else:
+                line = line.strip()
+                key, value = line.split(' ')
+                data_dict[domain_name]['memory.{0}'.format(key)] = value
+
+        # find delta from database
+        params = []
+
+        # skip on empty vm on this compute
+        if len(data_dict.keys()) == 0:
+            return
+
+        sql = 'select domain_name, item_key, item_value from cbis_virsh_stat_raw ' \
+              'where domain_name in (%s)' % (','.join(['%s'] * len(data_dict.keys())),)
+
+        sql += ' and cbis_pod_id = %s and clock = %s '
+
+        params.extend(data_dict.keys())
+        params.append(cbis_pod_id)
+        params.append(cbis_undercloud_last_sync)
+
+        conn = self._conn
+
+        curr = conn.cursor()
+
+        curr.execute(sql, params)
+
+        last_data_dict = collections.defaultdict(dict)
+        for (domain_name, item_key, item_value) in curr:
+            last_data_dict[domain_name][item_key] = item_value
+
+
+        # calculate for delta
+        cbis_virsh_stat_raw_values = []
+        for domain_name, items in data_dict.iteritems():
+            for item_key, item_value in items.iteritems():
+                previous_value = item_value
+                try:
+                    previous_value = last_data_dict[domain_name][item_key]
+                except KeyError:
+                    pass
+
+                delta_value = long(item_value) - long(previous_value)
+                cbis_virsh_stat_raw_values.append({'cbis_pod_id': cbis_pod_id,
+                                                   'domain_name': domain_name,
+                                                   'item_key': item_key,
+                                                   'item_value': item_value,
+                                                   'item_delta': delta_value,
+                                                   'clock': cbis_undercloud_current_sync,
+                                                   'clock_delta': clock_delta
+                                                  })
+
+        insert_sql = 'insert into cbis_virsh_stat_raw (cbis_pod_id, domain_name, item_key, item_value, item_delta, clock, clock_delta) ' \
+                     'values (%(cbis_pod_id)s, %(domain_name)s, %(item_key)s, %(item_value)s, %(item_delta)s, %(clock)s, %(clock_delta)s)'
+        curr.executemany(insert_sql, cbis_virsh_stat_raw_values)
+
+        curr.close()
+
 
     def aggregate_hourly(self, now=time.time()):
         last_hour = datetime.fromtimestamp(now).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
