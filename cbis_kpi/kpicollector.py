@@ -456,36 +456,38 @@ class VirshCollector(object):
         self.log.info('Aggregate Hourly from %s to %s' %
                       (last_hour.strftime('%Y-%m-%d %H:%M:%S'), current_hour.strftime('%Y-%m-%d %H:%M:%S')))
 
-        with util.DBConnection().get_connection() as conn:
+        conn = util.DBConnection().get_connection()
 
-            curr = conn.cursor()
+        curr = conn.cursor()
 
-            curr.execute(sql, params)
+        curr.execute(sql, params)
 
-            hourly_records = []
-            for (cbis_pod_id, domain_name, item_key, max_value, min_value, avg_value) in curr:
-                hourly_records.append({'cbis_pod_id':cbis_pod_id,
-                                       'domain_name': domain_name,
-                                       'item_key': item_key,
-                                       'max_value': max_value,
-                                       'min_value': min_value,
-                                       'avg_value': avg_value,
-                                       'clock': params['to_date']})
+        hourly_records = []
+        for (cbis_pod_id, domain_name, item_key, max_value, min_value, avg_value) in curr:
+            hourly_records.append({'cbis_pod_id':cbis_pod_id,
+                                   'domain_name': domain_name,
+                                   'item_key': item_key,
+                                   'max_value': max_value,
+                                   'min_value': min_value,
+                                   'avg_value': avg_value,
+                                   'clock': params['to_date']})
 
-            #delete data
-            delete_sql = 'delete from cbis_virsh_stat_hour where clock = %(clock)s'
-            curr.execute(delete_sql, {'clock': params['to_date']})
+        #delete data
+        delete_sql = 'delete from cbis_virsh_stat_hour where clock = %(clock)s'
+        curr.execute(delete_sql, {'clock': params['to_date']})
 
-            insert_sql = 'insert into cbis_virsh_stat_hour (cbis_pod_id, domain_name, item_key, max_value, min_value, avg_value, clock) ' \
-                         'values (%(cbis_pod_id)s, %(domain_name)s, %(item_key)s, %(max_value)s, %(min_value)s, %(avg_value)s, %(clock)s)'
+        insert_sql = 'insert into cbis_virsh_stat_hour (cbis_pod_id, domain_name, item_key, max_value, min_value, avg_value, clock) ' \
+                     'values (%(cbis_pod_id)s, %(domain_name)s, %(item_key)s, %(max_value)s, %(min_value)s, %(avg_value)s, %(clock)s)'
 
-            for records in util.chunks(hourly_records, 10000):
+        for records in util.chunks(hourly_records, 10000):
 
-                curr.executemany(insert_sql, records)
+            curr.executemany(insert_sql, records)
 
-            curr.close()
+        curr.close()
 
-            conn.commit()
+        conn.commit()
+
+        conn.close()
 
     def aggregate_daily(self, now=time.time()):
         yesterday = datetime.fromtimestamp(now).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
@@ -501,36 +503,38 @@ class VirshCollector(object):
         self.log.info('Aggregate Daily from %s to %s' %
                       (yesterday.strftime('%Y-%m-%d %H:%M:%S'),today.strftime('%Y-%m-%d %H:%M:%S')))
 
-        with util.DBConnection().get_connection() as conn:
+        conn = util.DBConnection().get_connection()
 
-            curr = conn.cursor()
+        curr = conn.cursor()
 
-            curr.execute(sql, params)
+        curr.execute(sql, params)
 
-            daily_records = []
-            for (cbis_pod_id, domain_name, item_key, max_value, min_value, avg_value) in curr:
-                daily_records.append({'cbis_pod_id':cbis_pod_id,
-                                       'domain_name': domain_name,
-                                       'item_key': item_key,
-                                       'max_value': max_value,
-                                       'min_value': min_value,
-                                       'avg_value': avg_value,
-                                       'clock': params['to_date']})
+        daily_records = []
+        for (cbis_pod_id, domain_name, item_key, max_value, min_value, avg_value) in curr:
+            daily_records.append({'cbis_pod_id':cbis_pod_id,
+                                   'domain_name': domain_name,
+                                   'item_key': item_key,
+                                   'max_value': max_value,
+                                   'min_value': min_value,
+                                   'avg_value': avg_value,
+                                   'clock': params['to_date']})
 
-            #delete data
-            delete_sql = 'delete from cbis_virsh_stat_day where clock = %(clock)s'
-            curr.execute(delete_sql, {'clock': params['to_date']})
+        #delete data
+        delete_sql = 'delete from cbis_virsh_stat_day where clock = %(clock)s'
+        curr.execute(delete_sql, {'clock': params['to_date']})
 
-            insert_sql = 'insert into cbis_virsh_stat_day (cbis_pod_id, domain_name, item_key, max_value, min_value, avg_value, clock) ' \
-                         'values (%(cbis_pod_id)s, %(domain_name)s, %(item_key)s, %(max_value)s, %(min_value)s, %(avg_value)s, %(clock)s)'
+        insert_sql = 'insert into cbis_virsh_stat_day (cbis_pod_id, domain_name, item_key, max_value, min_value, avg_value, clock) ' \
+                     'values (%(cbis_pod_id)s, %(domain_name)s, %(item_key)s, %(max_value)s, %(min_value)s, %(avg_value)s, %(clock)s)'
 
-            for records in util.chunks(daily_records, 10000):
+        for records in util.chunks(daily_records, 10000):
 
-                curr.executemany(insert_sql, records)
+            curr.executemany(insert_sql, records)
 
-            curr.close()
+        curr.close()
 
-            conn.commit()
+        conn.commit()
+
+        conn.close()
 
 
 class ZabbixCollector(object):
@@ -850,28 +854,32 @@ class CephDiskCollect(object):
     def collect(self):
         self.log.info('Connecting to database')
 
-        with util.DBConnection().get_connection() as conn:
+        conn = util.DBConnection().get_connection()
 
-            self._conn = conn
+        self._conn = conn
 
-            curr = conn.cursor()
+        curr = conn.cursor()
 
-            curr.execute('select cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username '
-                         'from cbis_pod where enable=1')
+        curr.execute('select cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username '
+                     'from cbis_pod where enable=1')
 
-            for (cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username) in curr:
-                kwargs = {'cbis_pod_id': cbis_pod_id,
-                          'test_flag': False}
+        for (cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username) in curr:
+            kwargs = {'cbis_pod_id': cbis_pod_id,
+                      'test_flag': False}
 
-                executor = util.SshExecutor(cbis_undercloud_addr, cbis_undercloud_username, **kwargs)
+            executor = util.SshExecutor(cbis_undercloud_addr, cbis_undercloud_username, **kwargs)
 
-                executor.run('cephstorage-*',
-                             'sudo ceph-disk list | grep osd',
-                             callback=self._callback_cephdisk)
-
-            curr.close()
+            executor.run('cephstorage-*',
+                         'sudo ceph-disk list | grep osd',
+                         callback=self._callback_cephdisk)
 
             conn.commit()
+
+        curr.close()
+
+        conn.close()
+
+
 
     def _callback_cephdisk(self, hostname, line_each_node, **kwargs):
         domain_name = None
