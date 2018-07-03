@@ -49,7 +49,7 @@ def main(args=sys.argv[1:]):
 
             try:
                 start_time = time.time()
-                #zabbix.collect()
+                zabbix.collect()
                 log.info('zabbix collect took %s seconds' % (time.time() - start_time))
             except:
                 log.exception('error in zabbix collect')
@@ -83,7 +83,7 @@ def main(args=sys.argv[1:]):
 
             try:
                 start_time = time.time()
-                #virsh.collect()
+                virsh.collect()
                 log.info('virsh collect took %s seconds' % (time.time() - start_time))
             except:
                 log.exception('error in virsh collect')

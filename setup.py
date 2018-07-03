@@ -43,7 +43,7 @@ class Sdist(sdist):
         self.distribution.metadata.version = version.strip()
         if 'dirty' in version:
             print('[FAIL] Current source code is not in git yet', file=sys.stderr)
-            return
+            #return
 
         with open('VERSION', 'wb') as f:
             f.write(version.strip())
