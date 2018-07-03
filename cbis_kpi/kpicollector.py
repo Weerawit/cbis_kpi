@@ -101,9 +101,13 @@ class VirshCollector(object):
 
                 curr2.execute('update cbis_pod set cbis_undercloud_last_sync = %s where cbis_pod_id = %s',
                              (cbis_undercloud_current_sync, cbis_pod_id))
+
+                curr2.close()
+
+            curr.close()
+
             conn.commit()
 
-            #curr.close()
 
     def _callback_novalist(self, hostname, line_each_node, **kwargs):
         cbis_pod_id = kwargs.get('cbis_pod_id')
@@ -861,9 +865,9 @@ class CephDiskCollect(object):
                              'sudo ceph-disk list | grep osd',
                              callback=self._callback_cephdisk)
 
-            conn.commit()
+            curr.close()
 
-            #curr.close()
+            conn.commit()
 
     def _callback_cephdisk(self, hostname, line_each_node, **kwargs):
         domain_name = None
