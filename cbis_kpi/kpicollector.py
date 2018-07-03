@@ -52,8 +52,6 @@ class VirshCollector(object):
                 pass
             conn.commit()
 
-            curr.close()
-
     def partition(self):
         self._partition_util('cbis_virsh_stat_raw', 14)
         self._partition_util('cbis_virsh_stat_hour', 90)
@@ -102,8 +100,6 @@ class VirshCollector(object):
                              (cbis_undercloud_current_sync, cbis_pod_id))
                 conn.commit()
 
-            curr.close()
-
     def _callback_novalist(self, hostname, line_each_node, **kwargs):
         cbis_pod_id = kwargs.get('cbis_pod_id')
 
@@ -135,8 +131,6 @@ class VirshCollector(object):
         sql = 'update cbis_virsh_list set project_name = %(project_name)s where cbis_pod_id = %(cbis_pod_id)s and domain_name = %(domain_name)s'
 
         curr.executemany(sql, records)
-
-        curr.close()
 
     def _callback_dumpxml(self, hostname, line_each_node, **kwargs):
         cbis_pod_id = kwargs.get('cbis_pod_id')
@@ -207,8 +201,6 @@ class VirshCollector(object):
         insert_sql = 'insert into cbis_virsh_meta (cbis_pod_id, hostname, domain_name, meta_key, meta_value) ' \
                      'values (%(cbis_pod_id)s, %(hostname)s, %(domain_name)s, %(meta_key)s, %(meta_value)s)'
         curr.executemany(insert_sql, meta_records)
-
-        curr.close()
 
     def _parse_xml(self, hostname, domain_xml, **kwargs):
         cbis_pod_id = kwargs.get('cbis_pod_id')
@@ -362,8 +354,6 @@ class VirshCollector(object):
                      'values (%(cbis_pod_id)s, %(domain_name)s, %(item_key)s, %(item_value)s, %(item_delta)s, %(clock)s, %(clock_delta)s)'
         curr.executemany(insert_sql, cbis_virsh_stat_raw_values)
 
-        curr.close()
-
     def _callback_memstat(self, hostname, line_each_node, **kwargs):
         domain_name = None
         cbis_undercloud_last_sync = kwargs.get('cbis_undercloud_last_sync')
@@ -434,8 +424,6 @@ class VirshCollector(object):
                      'values (%(cbis_pod_id)s, %(domain_name)s, %(item_key)s, %(item_value)s, %(item_delta)s, %(clock)s, %(clock_delta)s)'
         curr.executemany(insert_sql, cbis_virsh_stat_raw_values)
 
-        curr.close()
-
 
     def aggregate_hourly(self, now=time.time()):
         last_hour = datetime.fromtimestamp(now).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
@@ -477,8 +465,6 @@ class VirshCollector(object):
             for records in util.chunks(hourly_records, 10000):
 
                 curr.executemany(insert_sql, records)
-
-            curr.close()
 
             conn.commit()
 
@@ -523,8 +509,6 @@ class VirshCollector(object):
 
                 curr.executemany(insert_sql, records)
 
-            curr.close()
-
             conn.commit()
 
 
@@ -555,7 +539,6 @@ class ZabbixCollector(object):
 
             self._item_keys = list(keys)
 
-            curr.close()
 
     def _partition_util(self, table_name, number_of_days=14):
         tomorrow = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
@@ -584,7 +567,6 @@ class ZabbixCollector(object):
                 pass
             conn.commit()
 
-            curr.close()
 
     def partition(self):
         self._partition_util('cbis_zabbix_raw', 14)
@@ -616,8 +598,6 @@ class ZabbixCollector(object):
                 curr.execute('update cbis_pod set cbis_zabbix_last_sync = %s where cbis_pod_id = %s',
                              (cbis_zabbix_last_sync, cbis_pod_id))
                 conn.commit()
-
-            curr.close()
 
     def _collect_pod(self, cbis_pod_id, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
                      cbis_zabbix_last_sync, sync_time_till=time.time()):
@@ -737,7 +717,6 @@ class ZabbixCollector(object):
             'VALUES (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_value)s, %(item_unit)s, %(clock)s)',
             records)
 
-        curr.close()
 
     def aggregate_hourly(self, now=time.time()):
         last_hour = datetime.fromtimestamp(now).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
@@ -861,8 +840,6 @@ class CephDiskCollect(object):
 
                 conn.commit()
 
-            curr.close()
-
     def _callback_cephdisk(self, hostname, line_each_node, **kwargs):
         domain_name = None
         cbis_pod_id = kwargs.get('cbis_pod_id')
@@ -898,12 +875,10 @@ class CephDiskCollect(object):
 
             curr.executemany(insert_sql, ceph_list_recoreds)
 
-            curr.close()
-
 
 if __name__ == '__main__':
     PATH = os.path.dirname(os.path.abspath(__file__))
     logging.config.fileConfig(os.path.join(PATH, 'logging.ini'))
-    client = VirshCollector()
+    client = ZabbixCollector()
     client.partition()
-    client.collect()
+    client.aggregate_hourly(now=float('1527768000'))
