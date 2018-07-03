@@ -189,7 +189,7 @@ setup(
     },
 
     cmdclass={
-        #'sdist': Sdist,
+        'sdist': Sdist,
         'version': GitVersion
     },
 
