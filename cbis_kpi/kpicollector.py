@@ -101,7 +101,7 @@ class VirshCollector(object):
 
                 curr2.execute('update cbis_pod set cbis_undercloud_last_sync = %s where cbis_pod_id = %s',
                              (cbis_undercloud_current_sync, cbis_pod_id))
-                conn.commit()
+            conn.commit()
 
             #curr.close()
 
@@ -615,7 +615,7 @@ class ZabbixCollector(object):
 
                 curr2.execute('update cbis_pod set cbis_zabbix_last_sync = %s where cbis_pod_id = %s',
                              (cbis_zabbix_last_sync, cbis_pod_id))
-                conn.commit()
+            conn.commit()
 
             #curr.close()
 
@@ -861,7 +861,7 @@ class CephDiskCollect(object):
                              'sudo ceph-disk list | grep osd',
                              callback=self._callback_cephdisk)
 
-                conn.commit()
+            conn.commit()
 
             #curr.close()
 
