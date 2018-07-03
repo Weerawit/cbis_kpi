@@ -781,9 +781,9 @@ class ZabbixCollector(object):
 
                 curr.executemany(insert_sql, records)
 
-            curr.close()
-
             conn.commit()
+
+            curr.close()
 
     def aggregate_daily(self, now=time.time()):
         yesterday = datetime.fromtimestamp(now).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
@@ -827,9 +827,9 @@ class ZabbixCollector(object):
 
                 curr.executemany(insert_sql, records)
 
-            curr.close()
-
             conn.commit()
+
+            curr.close()
 
 
 class CephDiskCollect(object):
