@@ -57,7 +57,7 @@ def main(args=sys.argv[1:]):
         if not aggregate_type or 'HOUR' in aggregate_type or 'ALL' in aggregate_type:
             try:
                 start_time = time.time()
-                zabbix.aggregate_hourly(now=float(now.strftime('%s')))
+                #zabbix.aggregate_hourly(now=float(now.strftime('%s')))
                 log.info('zabbix aggregate_hourly took %s seconds' % (time.time() - start_time))
             except:
                 log.exception('error in zabbix aggregate_hourly')
