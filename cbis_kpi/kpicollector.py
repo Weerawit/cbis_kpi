@@ -38,8 +38,8 @@ class VirshCollector(object):
                 self.log.info('checking partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
                 curr.execute(create_partition_sql)
                 self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-            except:
-                self.log.info('partition not found %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+            except Exception as e:
+                self.log.info('partition not found %s p_%s [%s]' % (table_name, tomorrow.strftime('%s'), e))
                 pass
 
             try:
@@ -47,8 +47,8 @@ class VirshCollector(object):
                 self.log.info('checking partition to delete for %s p_%s' % (table_name, last_days.strftime('%s'),))
                 curr.execute(drop_partition_sql)
                 self.log.info('dropped partition for %s p_%s' % (table_name, last_days.strftime('%s'),))
-            except:
-                self.log.info('partition not found %s p_%s' % (table_name, last_days.strftime('%s'),))
+            except Exception as e:
+                self.log.info('partition not found %s p_%s [%s]' % (table_name, last_days.strftime('%s'), e))
                 pass
             conn.commit()
 
@@ -553,8 +553,8 @@ class ZabbixCollector(object):
                 self.log.info('checking partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
                 curr.execute(create_partition_sql)
                 self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-            except:
-                self.log.info('partition not found %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+            except Exception as e:
+                self.log.info('partition not found %s p_%s [%s]' % (table_name, tomorrow.strftime('%s'), e))
                 pass
 
             try:
@@ -562,11 +562,10 @@ class ZabbixCollector(object):
                 self.log.info('checking partition to delete for %s p_%s' % (table_name, last_days.strftime('%s'),))
                 curr.execute(drop_partition_sql)
                 self.log.info('dropped partition for %s p_%s' % (table_name, last_days.strftime('%s'),))
-            except:
-                self.log.info('partition not found %s p_%s' % (table_name, last_days.strftime('%s'),))
+            except Exception as e:
+                self.log.info('partition not found %s p_%s [%s]' % (table_name, last_days.strftime('%s'), e))
                 pass
             conn.commit()
-
 
     def partition(self):
         self._partition_util('cbis_zabbix_raw', 14)
@@ -663,8 +662,8 @@ class ZabbixCollector(object):
                                                                    time_till=time_till,
                                                                    sortfield=['itemid', 'clock']))
                             break
-                        except:
-                            self.log.exception('error getting history, retrying for %s' % (i,))
+                        except Exception as e:
+                            self.log.exception('error getting history, retrying for %s [%s]' % (i, e))
 
 
             # raw records
@@ -716,7 +715,6 @@ class ZabbixCollector(object):
             'INSERT INTO cbis_zabbix_raw (cbis_pod_id, hostname, item_key, item_value, item_unit, clock) '
             'VALUES (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_value)s, %(item_unit)s, %(clock)s)',
             records)
-
 
     def aggregate_hourly(self, now=time.time()):
         last_hour = datetime.fromtimestamp(now).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)

@@ -35,8 +35,9 @@ def main(args=sys.argv[1:]):
                 start_time = time.time()
                 cephdisk.collect()
                 log.info('cephdisk collect took %s seconds' % (time.time() - start_time))
-            except:
+            except Exception as e:
                 log.exception('error in cephdisk collect')
+                log.exception(e)
 
     def zabbix_thread():
         if not aggregate_type:
@@ -44,23 +45,26 @@ def main(args=sys.argv[1:]):
                 start_time = time.time()
                 zabbix.partition()
                 log.info('zabbix partition took %s seconds' % (time.time() - start_time))
-            except:
+            except Exception as e:
                 log.exception('error in zabbix partition')
+                log.exception(e)
 
             try:
                 start_time = time.time()
                 zabbix.collect()
                 log.info('zabbix collect took %s seconds' % (time.time() - start_time))
-            except:
+            except Exception as e:
                 log.exception('error in zabbix collect')
+                log.exception(e)
 
         if not aggregate_type or 'HOUR' in aggregate_type or 'ALL' in aggregate_type:
             try:
                 start_time = time.time()
                 zabbix.aggregate_hourly(now=float(now.strftime('%s')))
                 log.info('zabbix aggregate_hourly took %s seconds' % (time.time() - start_time))
-            except:
+            except Exception as e:
                 log.exception('error in zabbix aggregate_hourly')
+                log.exception(e)
 
         if not aggregate_type or 'DAY' in aggregate_type or 'ALL' in aggregate_type:
             try:
@@ -68,8 +72,9 @@ def main(args=sys.argv[1:]):
                     start_time = time.time()
                     zabbix.aggregate_daily(now=float(now.strftime('%s')))
                     log.info('zabbix aggregate_daily took %s seconds' % (time.time() - start_time))
-            except:
+            except Exception as e:
                 log.exception('error in zabbix aggregate_daily')
+                log.exception(e)
 
     def virsh_thread():
 
@@ -78,23 +83,26 @@ def main(args=sys.argv[1:]):
                 start_time = time.time()
                 virsh.partition()
                 log.info('virsh partition took %s seconds' % (time.time() - start_time))
-            except:
+            except Exception as e:
                 log.exception('error in virsh partition')
+                log.exception(e)
 
             try:
                 start_time = time.time()
                 virsh.collect()
                 log.info('virsh collect took %s seconds' % (time.time() - start_time))
-            except:
+            except Exception as e:
                 log.exception('error in virsh collect')
+                log.exception(e)
 
         if not aggregate_type or 'HOUR' in aggregate_type or 'ALL' in aggregate_type:
             try:
                 start_time = time.time()
                 virsh.aggregate_hourly(now=float(now.strftime('%s')))
                 log.info('virsh aggregate_hourly took %s seconds' % (time.time() - start_time))
-            except:
+            except Exception as e:
                 log.exception('error in virsh aggregate_hourly')
+                log.exception(e)
 
         if not aggregate_type or 'DAY' in aggregate_type or 'ALL' in aggregate_type:
             try:
@@ -102,8 +110,9 @@ def main(args=sys.argv[1:]):
                     start_time = time.time()
                     virsh.aggregate_daily(now=float(now.strftime('%s')))
                     log.info('virsh aggregate_daily took %s seconds' % (time.time() - start_time))
-            except:
+            except Exception as e:
                 log.exception('error in virsh aggregate_daily')
+                log.exception(e)
 
     all_thread = [threading.Thread(target=zabbix_thread),
                   threading.Thread(target=virsh_thread),

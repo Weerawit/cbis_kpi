@@ -14,8 +14,8 @@ Installation
     c) place below content to /etc/my.cnf
 
     [mysqld]
-    datadir=/home/cbis-kpi/db/
-    socket=/home/cbis-kpi/db/mysql.sock
+    datadir=/home/cbis-kpi/mysql/
+    socket=/home/cbis-kpi/mysql/mysql.sock
     # Disabling symbolic-links is recommended to prevent assorted security risks
     symbolic-links=0
     # Settings user and group are ignored when systemd is used.
