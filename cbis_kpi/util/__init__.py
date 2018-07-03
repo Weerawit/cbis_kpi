@@ -68,8 +68,7 @@ class DBConnection(object):
         self._db_pool = self._create_db_pool()
 
     def get_connection(self):
-        #return contextlib.closing(self._create_db_pool().get_connection())
-        return self._create_db_pool().get_connection()
+        return contextlib.closing(self._create_db_pool().get_connection())
 
     def _create_db_pool(self):
         config_dict = {}
