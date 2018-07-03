@@ -619,9 +619,13 @@ class ZabbixCollector(object):
 
                 curr2.execute('update cbis_pod set cbis_zabbix_last_sync = %s where cbis_pod_id = %s',
                              (cbis_zabbix_last_sync, cbis_pod_id))
+
+                curr2.close()
+
+            curr.close()
+
             conn.commit()
 
-            #curr.close()
 
     def _collect_pod(self, cbis_pod_id, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
                      cbis_zabbix_last_sync, sync_time_till=time.time()):
