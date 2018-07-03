@@ -97,9 +97,13 @@ class VirshCollector(object):
                              'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ print \\\"Domain: \\\" \$2; system(\\\"sudo virsh dommemstat \\\" \$2)}\"',
                              callback=self._callback_memstat)
 
-                curr.execute('update cbis_pod set cbis_undercloud_last_sync = %s where cbis_pod_id = %s',
+                curr2 = conn.cursor()
+
+                curr2.execute('update cbis_pod set cbis_undercloud_last_sync = %s where cbis_pod_id = %s',
                              (cbis_undercloud_current_sync, cbis_pod_id))
                 conn.commit()
+
+            curr.close()
 
     def _callback_novalist(self, hostname, line_each_node, **kwargs):
         cbis_pod_id = kwargs.get('cbis_pod_id')
@@ -607,11 +611,13 @@ class ZabbixCollector(object):
                                                           cbis_zabbix_username=cbis_zabbix_username,
                                                           cbis_zabbix_password=cbis_zabbix_password,
                                                           cbis_zabbix_last_sync=cbis_zabbix_last_sync)
+                curr2 = conn.cursor()
 
-                curr.execute('update cbis_pod set cbis_zabbix_last_sync = %s where cbis_pod_id = %s',
+                curr2.execute('update cbis_pod set cbis_zabbix_last_sync = %s where cbis_pod_id = %s',
                              (cbis_zabbix_last_sync, cbis_pod_id))
                 conn.commit()
 
+            curr.close()
 
     def _collect_pod(self, cbis_pod_id, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
                      cbis_zabbix_last_sync, sync_time_till=time.time()):
@@ -856,6 +862,8 @@ class CephDiskCollect(object):
                              callback=self._callback_cephdisk)
 
                 conn.commit()
+
+            curr.close()
 
     def _callback_cephdisk(self, hostname, line_each_node, **kwargs):
         domain_name = None
