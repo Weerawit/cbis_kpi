@@ -28,31 +28,31 @@ class VirshCollector(object):
     def _partition_util(self, table_name, number_of_days=14):
         tomorrow = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
         last_days = tomorrow - timedelta(days=number_of_days)
-        with util.DBConnection().get_connection() as conn:
-            curr = conn.cursor()
+        conn = util.DBConnection().get_connection()
+        curr = conn.cursor()
 
-            try:
-                create_partition_sql = 'alter table %s add partition (' \
-                                       'partition p_%s values less than (%s))' % \
-                                       (table_name, tomorrow.strftime('%s'), tomorrow.strftime('%s'))
-                self.log.info('checking partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-                curr.execute(create_partition_sql)
-                self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-            except:
-                self.log.info('partition not found %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-                pass
+        try:
+            create_partition_sql = 'alter table %s add partition (' \
+                                   'partition p_%s values less than (%s))' % \
+                                   (table_name, tomorrow.strftime('%s'), tomorrow.strftime('%s'))
+            self.log.info('checking partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+            curr.execute(create_partition_sql)
+            self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+        except:
+            self.log.info('partition not found %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+            pass
 
-            try:
-                drop_partition_sql = 'alter table %s drop partition p_%s' % (table_name, last_days.strftime('%s'),)
-                self.log.info('checking partition to delete for %s p_%s' % (table_name, last_days.strftime('%s'),))
-                curr.execute(drop_partition_sql)
-                self.log.info('dropped partition for %s p_%s' % (table_name, last_days.strftime('%s'),))
-            except:
-                self.log.info('partition not found %s p_%s' % (table_name, last_days.strftime('%s'),))
-                pass
-            conn.commit()
+        try:
+            drop_partition_sql = 'alter table %s drop partition p_%s' % (table_name, last_days.strftime('%s'),)
+            self.log.info('checking partition to delete for %s p_%s' % (table_name, last_days.strftime('%s'),))
+            curr.execute(drop_partition_sql)
+            self.log.info('dropped partition for %s p_%s' % (table_name, last_days.strftime('%s'),))
+        except:
+            self.log.info('partition not found %s p_%s' % (table_name, last_days.strftime('%s'),))
+            pass
+        conn.commit()
 
-            curr.close()
+        curr.close()
 
     def partition(self):
         self._partition_util('cbis_virsh_stat_raw', 14)
@@ -62,52 +62,51 @@ class VirshCollector(object):
     def collect(self):
         self.log.info('Connecting to database')
 
-        with util.DBConnection().get_connection() as conn:
+        conn = util.DBConnection().get_connection()
 
-            self._conn = conn
+        self._conn = conn
 
-            curr = conn.cursor()
+        curr = conn.cursor()
 
-            curr.execute('select cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username,'
-                         'cbis_undercloud_last_sync from cbis_pod where enable=1')
+        curr.execute('select cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username,'
+                     'cbis_undercloud_last_sync from cbis_pod where enable=1')
 
-            for (cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username,
-                 cbis_undercloud_last_sync) in curr:
-                cbis_undercloud_current_sync = time.time()
-                kwargs = {'cbis_undercloud_last_sync': cbis_undercloud_last_sync,
-                          'cbis_pod_id': cbis_pod_id,
-                          'cbis_undercloud_current_sync': cbis_undercloud_current_sync,
-                          'test_flag': False}
+        for (cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username,
+             cbis_undercloud_last_sync) in curr:
+            cbis_undercloud_current_sync = time.time()
+            kwargs = {'cbis_undercloud_last_sync': cbis_undercloud_last_sync,
+                      'cbis_pod_id': cbis_pod_id,
+                      'cbis_undercloud_current_sync': cbis_undercloud_current_sync,
+                      'test_flag': False}
 
-                executor = util.SshExecutor(cbis_undercloud_addr, cbis_undercloud_username, **kwargs)
+            executor = util.SshExecutor(cbis_undercloud_addr, cbis_undercloud_username, **kwargs)
 
-                executor.run('compute-*',
-                             'sudo ip link; sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh dumpxml \\\" \$2)}\"',
-                             callback=self._callback_dumpxml)
+            executor.run('compute-*',
+                         'sudo ip link; sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh dumpxml \\\" \$2)}\"',
+                         callback=self._callback_dumpxml)
 
-                executor.run('undercloud',
-                             'source /home/stack/overcloudrc;openstack project list -f json;nova list --all --fields host,name,instance_name,tenant_id',
-                             callback=self._callback_novalist)
+            executor.run('undercloud',
+                         'source /home/stack/overcloudrc;openstack project list -f json;nova list --all --fields host,name,instance_name,tenant_id',
+                         callback=self._callback_novalist)
 
-                executor.run('compute-*',
-                             'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh domstats \\\" \$2)}\"',
-                             callback=self._callback_stat)
+            executor.run('compute-*',
+                         'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh domstats \\\" \$2)}\"',
+                         callback=self._callback_stat)
 
-                executor.run('compute-*',
-                             'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ print \\\"Domain: \\\" \$2; system(\\\"sudo virsh dommemstat \\\" \$2)}\"',
-                             callback=self._callback_memstat)
+            executor.run('compute-*',
+                         'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ print \\\"Domain: \\\" \$2; system(\\\"sudo virsh dommemstat \\\" \$2)}\"',
+                         callback=self._callback_memstat)
 
-                curr2 = conn.cursor()
+            curr2 = conn.cursor()
 
-                curr2.execute('update cbis_pod set cbis_undercloud_last_sync = %s where cbis_pod_id = %s',
-                             (cbis_undercloud_current_sync, cbis_pod_id))
+            curr2.execute('update cbis_pod set cbis_undercloud_last_sync = %s where cbis_pod_id = %s',
+                         (cbis_undercloud_current_sync, cbis_pod_id))
 
-                curr2.close()
+            curr2.close()
 
-            curr.close()
+        curr.close()
 
-            conn.commit()
-
+        conn.commit()
 
     def _callback_novalist(self, hostname, line_each_node, **kwargs):
         cbis_pod_id = kwargs.get('cbis_pod_id')
@@ -487,7 +486,7 @@ class VirshCollector(object):
 
         conn.commit()
 
-        conn.close()
+        #conn.close()
 
     def aggregate_daily(self, now=time.time()):
         yesterday = datetime.fromtimestamp(now).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
@@ -534,7 +533,7 @@ class VirshCollector(object):
 
         conn.commit()
 
-        conn.close()
+        #conn.close()
 
 
 class ZabbixCollector(object):
@@ -549,51 +548,51 @@ class ZabbixCollector(object):
 
     def _load_config(self):
 
-        with util.DBConnection().get_connection() as conn:
+        conn = util.DBConnection().get_connection()
 
-            curr = conn.cursor()
+        curr = conn.cursor()
 
-            curr.execute('select config_key, config_value from config where config_key like %s', ('zabbix_%',))
+        curr.execute('select config_key, config_value from config where config_key like %s', ('zabbix_%',))
 
-            keys = set()
-            for (config_key, config_value) in curr:
-                if config_key == 'zabbix_item_key':
-                    keys.add(config_value)
-                if config_key == 'zabbix_query_interval':
-                    self._period_data = int(config_value)
+        keys = set()
+        for (config_key, config_value) in curr:
+            if config_key == 'zabbix_item_key':
+                keys.add(config_value)
+            if config_key == 'zabbix_query_interval':
+                self._period_data = int(config_value)
 
-            self._item_keys = list(keys)
+        self._item_keys = list(keys)
 
-            curr.close()
+        curr.close()
 
     def _partition_util(self, table_name, number_of_days=14):
         tomorrow = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
         last_days = tomorrow - timedelta(days=number_of_days)
-        with util.DBConnection().get_connection() as conn:
-            curr = conn.cursor()
+        conn = util.DBConnection().get_connection()
+        curr = conn.cursor()
 
-            try:
-                create_partition_sql = 'alter table %s add partition (' \
-                                       'partition p_%s values less than (%s))' % \
-                                       (table_name, tomorrow.strftime('%s'), tomorrow.strftime('%s'))
-                self.log.info('checking partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-                curr.execute(create_partition_sql)
-                self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-            except:
-                self.log.info('partition not found %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-                pass
+        try:
+            create_partition_sql = 'alter table %s add partition (' \
+                                   'partition p_%s values less than (%s))' % \
+                                   (table_name, tomorrow.strftime('%s'), tomorrow.strftime('%s'))
+            self.log.info('checking partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+            curr.execute(create_partition_sql)
+            self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+        except:
+            self.log.info('partition not found %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+            pass
 
-            try:
-                drop_partition_sql = 'alter table %s drop partition p_%s' % (table_name, last_days.strftime('%s'),)
-                self.log.info('checking partition to delete for %s p_%s' % (table_name, last_days.strftime('%s'),))
-                curr.execute(drop_partition_sql)
-                self.log.info('dropped partition for %s p_%s' % (table_name, last_days.strftime('%s'),))
-            except:
-                self.log.info('partition not found %s p_%s' % (table_name, last_days.strftime('%s'),))
-                pass
-            conn.commit()
+        try:
+            drop_partition_sql = 'alter table %s drop partition p_%s' % (table_name, last_days.strftime('%s'),)
+            self.log.info('checking partition to delete for %s p_%s' % (table_name, last_days.strftime('%s'),))
+            curr.execute(drop_partition_sql)
+            self.log.info('dropped partition for %s p_%s' % (table_name, last_days.strftime('%s'),))
+        except:
+            self.log.info('partition not found %s p_%s' % (table_name, last_days.strftime('%s'),))
+            pass
+        conn.commit()
 
-            curr.close()
+        curr.close()
 
     def partition(self):
         self._partition_util('cbis_zabbix_raw', 14)
@@ -603,32 +602,32 @@ class ZabbixCollector(object):
     def collect(self):
         self.log.info('Connecting to database')
 
-        with util.DBConnection().get_connection() as conn:
+        conn = util.DBConnection().get_connection()
 
-            self._conn = conn
+        self._conn = conn
 
-            curr = conn.cursor()
+        curr = conn.cursor()
 
-            curr.execute('select cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username,'
-                         'cbis_zabbix_password, cbis_zabbix_last_sync from cbis_pod where enable=1')
+        curr.execute('select cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username,'
+                     'cbis_zabbix_password, cbis_zabbix_last_sync from cbis_pod where enable=1')
 
-            for (cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
-                 cbis_zabbix_last_sync) in curr:
-                cbis_zabbix_last_sync = self._collect_pod(cbis_pod_id=cbis_pod_id,
-                                                          cbis_zabbix_url=cbis_zabbix_url,
-                                                          cbis_zabbix_username=cbis_zabbix_username,
-                                                          cbis_zabbix_password=cbis_zabbix_password,
-                                                          cbis_zabbix_last_sync=cbis_zabbix_last_sync)
-                curr2 = conn.cursor()
+        for (cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
+             cbis_zabbix_last_sync) in curr:
+            cbis_zabbix_last_sync = self._collect_pod(cbis_pod_id=cbis_pod_id,
+                                                      cbis_zabbix_url=cbis_zabbix_url,
+                                                      cbis_zabbix_username=cbis_zabbix_username,
+                                                      cbis_zabbix_password=cbis_zabbix_password,
+                                                      cbis_zabbix_last_sync=cbis_zabbix_last_sync)
+            curr2 = conn.cursor()
 
-                curr2.execute('update cbis_pod set cbis_zabbix_last_sync = %s where cbis_pod_id = %s',
-                             (cbis_zabbix_last_sync, cbis_pod_id))
+            curr2.execute('update cbis_pod set cbis_zabbix_last_sync = %s where cbis_pod_id = %s',
+                         (cbis_zabbix_last_sync, cbis_pod_id))
 
-                curr2.close()
+            curr2.close()
 
-            curr.close()
+        curr.close()
 
-            conn.commit()
+        conn.commit()
 
 
     def _collect_pod(self, cbis_pod_id, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
@@ -765,37 +764,37 @@ class ZabbixCollector(object):
         self.log.info('Aggregate Hourly from %s to %s' %
                       (last_hour.strftime('%Y-%m-%d %H:%M:%S'), current_hour.strftime('%Y-%m-%d %H:%M:%S')))
 
-        with util.DBConnection().get_connection() as conn:
+        conn = util.DBConnection().get_connection()
 
-            curr = conn.cursor()
+        curr = conn.cursor()
 
-            curr.execute(sql, params)
+        curr.execute(sql, params)
 
-            hourly_records = []
-            for (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value) in curr:
-                hourly_records.append({'cbis_pod_id':cbis_pod_id,
-                                       'hostname': hostname,
-                                       'item_key': item_key,
-                                       'item_unit': item_unit,
-                                       'max_value': max_value,
-                                       'min_value': min_value,
-                                       'avg_value': avg_value,
-                                       'clock': params['to_date']})
+        hourly_records = []
+        for (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value) in curr:
+            hourly_records.append({'cbis_pod_id':cbis_pod_id,
+                                   'hostname': hostname,
+                                   'item_key': item_key,
+                                   'item_unit': item_unit,
+                                   'max_value': max_value,
+                                   'min_value': min_value,
+                                   'avg_value': avg_value,
+                                   'clock': params['to_date']})
 
-            #delete data
-            delete_sql = 'delete from cbis_zabbix_hour where clock = %(clock)s'
-            curr.execute(delete_sql, {'clock': params['to_date']})
+        #delete data
+        delete_sql = 'delete from cbis_zabbix_hour where clock = %(clock)s'
+        curr.execute(delete_sql, {'clock': params['to_date']})
 
-            insert_sql = 'insert into cbis_zabbix_hour (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value, clock) ' \
-                         'values (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_unit)s, %(max_value)s, %(min_value)s, %(avg_value)s, %(clock)s)'
+        insert_sql = 'insert into cbis_zabbix_hour (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value, clock) ' \
+                     'values (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_unit)s, %(max_value)s, %(min_value)s, %(avg_value)s, %(clock)s)'
 
-            for records in util.chunks(hourly_records, 10000):
+        for records in util.chunks(hourly_records, 10000):
 
-                curr.executemany(insert_sql, records)
+            curr.executemany(insert_sql, records)
 
-            curr.close()
+        curr.close()
 
-            conn.commit()
+        conn.commit()
 
     def aggregate_daily(self, now=time.time()):
         yesterday = datetime.fromtimestamp(now).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
@@ -811,37 +810,37 @@ class ZabbixCollector(object):
         self.log.info('Aggregate Daily from %s to %s' %
                       (yesterday.strftime('%Y-%m-%d %H:%M:%S'),today.strftime('%Y-%m-%d %H:%M:%S')))
 
-        with util.DBConnection().get_connection() as conn:
+        conn = util.DBConnection().get_connection()
 
-            curr = conn.cursor()
+        curr = conn.cursor()
 
-            curr.execute(sql, params)
+        curr.execute(sql, params)
 
-            daily_records = []
-            for (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value) in curr:
-                daily_records.append({'cbis_pod_id':cbis_pod_id,
-                                      'hostname': hostname,
-                                      'item_key': item_key,
-                                      'item_unit': item_unit,
-                                      'max_value': max_value,
-                                      'min_value': min_value,
-                                      'avg_value': avg_value,
-                                      'clock': params['to_date']})
+        daily_records = []
+        for (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value) in curr:
+            daily_records.append({'cbis_pod_id':cbis_pod_id,
+                                  'hostname': hostname,
+                                  'item_key': item_key,
+                                  'item_unit': item_unit,
+                                  'max_value': max_value,
+                                  'min_value': min_value,
+                                  'avg_value': avg_value,
+                                  'clock': params['to_date']})
 
-            #delete data
-            delete_sql = 'delete from cbis_zabbix_day where clock = %(clock)s'
-            curr.execute(delete_sql, {'clock': params['to_date']})
+        #delete data
+        delete_sql = 'delete from cbis_zabbix_day where clock = %(clock)s'
+        curr.execute(delete_sql, {'clock': params['to_date']})
 
-            insert_sql = 'insert into cbis_zabbix_day (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value, clock) ' \
-                         'values (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_unit)s, %(max_value)s, %(min_value)s, %(avg_value)s, %(clock)s)'
+        insert_sql = 'insert into cbis_zabbix_day (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value, clock) ' \
+                     'values (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_unit)s, %(max_value)s, %(min_value)s, %(avg_value)s, %(clock)s)'
 
-            for records in util.chunks(daily_records, 10000):
+        for records in util.chunks(daily_records, 10000):
 
-                curr.executemany(insert_sql, records)
+            curr.executemany(insert_sql, records)
 
-            curr.close()
+        curr.close()
 
-            conn.commit()
+        conn.commit()
 
 
 class CephDiskCollect(object):
@@ -877,9 +876,7 @@ class CephDiskCollect(object):
 
         curr.close()
 
-        conn.close()
-
-
+        #conn.close()
 
     def _callback_cephdisk(self, hostname, line_each_node, **kwargs):
         domain_name = None
