@@ -14,8 +14,8 @@ Installation
     c) place below content to /etc/my.cnf
 
     [mysqld]
-    datadir=/var/lib/mysql
-    socket=/var/lib/mysql/mysql.sock
+    datadir=/home/cbis-kpi/db/
+    socket=/home/cbis-kpi/db/mysql.sock
     # Disabling symbolic-links is recommended to prevent assorted security risks
     symbolic-links=0
     # Settings user and group are ignored when systemd is used.
@@ -28,6 +28,10 @@ Installation
     [mysqld_safe]
     log-error=/var/log/mariadb/mariadb.log
     pid-file=/var/run/mariadb/mariadb.pid
+
+    [client]
+    port=3306
+    socket=/home/cbis_kpi/mysql/mysql.sock
 
     #
     # include all files from the config directory
