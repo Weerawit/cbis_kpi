@@ -148,14 +148,17 @@ class SshExecutor(object):
                 if hostname_re.search(line):
                     hostname = line.split(':')[1].strip()
                     i += 1
-                    next_line = lines[i]
-                    while not hostname_re.search(next_line):
-                        line_each_node += '%s\n\r' % next_line
-                        i += 1
-                        try:
-                            next_line = lines[i]
-                        except IndexError:
-                            break
+                    try:
+                        next_line = lines[i]
+                        while not hostname_re.search(next_line):
+                            line_each_node += '%s\n\r' % next_line
+                            i += 1
+                            try:
+                                next_line = lines[i]
+                            except IndexError:
+                                break
+                    except IndexError:
+                        pass
                     callback(hostname, line_each_node, **self._kwargs)
                 else:
                     i += 1
