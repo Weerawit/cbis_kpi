@@ -759,8 +759,10 @@ class ZabbixCollector(object):
 
             curr.execute(sql, params)
 
+            result_list = curr.fetchall()
+
             hourly_records = []
-            for (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value) in curr:
+            for (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value) in result_list:
                 hourly_records.append({'cbis_pod_id':cbis_pod_id,
                                        'hostname': hostname,
                                        'item_key': item_key,
@@ -774,12 +776,16 @@ class ZabbixCollector(object):
             delete_sql = 'delete from cbis_zabbix_hour where clock = %(clock)s'
             curr.execute(delete_sql, {'clock': params['to_date']})
 
+            curr.fetchall()
+
             insert_sql = 'insert into cbis_zabbix_hour (cbis_pod_id, hostname, item_key, item_unit, max_value, min_value, avg_value, clock) ' \
                          'values (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_unit)s, %(max_value)s, %(min_value)s, %(avg_value)s, %(clock)s)'
 
             for records in util.chunks(hourly_records, 10000):
 
                 curr.executemany(insert_sql, records)
+
+                curr.fetchall()
 
             conn.commit()
 
