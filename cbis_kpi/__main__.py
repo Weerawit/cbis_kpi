@@ -11,9 +11,15 @@ import kpicollector
 
 def is_process_running():
     try:
-        subprocess.check_output('pgrep -f cbis-kpi-collect', shell=True)
-        return True
-    except Exception:
+        pids = subprocess.check_output('pgrep -f cbis-kpi-collect', shell=True)
+
+        #pids = subprocess.check_output('pgrep -f cbis_kpi', shell=True)
+
+        for pid in pids.split('\n'):
+            if int(pid) != os.getpid():
+                return True
+        return False
+    except Exception as e:
         return False
 
 
