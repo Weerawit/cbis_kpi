@@ -539,7 +539,6 @@ class ZabbixCollector(object):
 
             self._item_keys = list(keys)
 
-
     def _partition_util(self, table_name, number_of_days=14):
         tomorrow = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
         last_days = tomorrow - timedelta(days=number_of_days)
@@ -550,21 +549,33 @@ class ZabbixCollector(object):
                 create_partition_sql = 'alter table %s add partition (' \
                                        'partition p_%s values less than (%s))' % \
                                        (table_name, tomorrow.strftime('%s'), tomorrow.strftime('%s'))
-                self.log.info('checking partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+                self.log.info('checking partition to create for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
                 curr.execute(create_partition_sql)
                 self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
             except Exception as e:
-                self.log.info('partition not found %s p_%s [%s]' % (table_name, tomorrow.strftime('%s'), e))
+                self.log.info('partition has been created %s p_%s [%s]' % (table_name, tomorrow.strftime('%s'), e))
                 pass
 
-            try:
-                drop_partition_sql = 'alter table %s drop partition p_%s' % (table_name, last_days.strftime('%s'),)
-                self.log.info('checking partition to delete for %s p_%s' % (table_name, last_days.strftime('%s'),))
-                curr.execute(drop_partition_sql)
-                self.log.info('dropped partition for %s p_%s' % (table_name, last_days.strftime('%s'),))
-            except Exception as e:
-                self.log.info('partition not found %s p_%s [%s]' % (table_name, last_days.strftime('%s'), e))
-                pass
+            query_partition_sql = 'explain partitions select * from %s' % (table_name,)
+            curr.execute(query_partition_sql)
+            partition_list = curr.fetchone()[3]
+            for partition_name in partition_list.split(','):
+                if 'p_0' in partition_name:
+                    continue
+                partition_name = partition_name.replace('p_', '')
+                partition_time = datetime.fromtimestamp(float(partition_name))
+                if partition_time < last_days:
+                    try:
+                        drop_partition_sql = 'alter table %s drop partition p_%s' % (
+                        table_name, partition_time.strftime('%s'),)
+                        self.log.info(
+                            'checking partition to delete for %s p_%s' % (table_name, partition_time.strftime('%s')))
+
+                        curr.execute(drop_partition_sql)
+                        self.log.info('dropped partition for %s p_%s' % (table_name, partition_time.strftime('%s'),))
+                    except Exception as e:
+                        self.log.info('partition not found %s p_%s [%s]' % (table_name, partition_time.strftime('%s'), e))
+                    pass
             conn.commit()
 
     def partition(self):
@@ -589,6 +600,7 @@ class ZabbixCollector(object):
             for (cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
                  cbis_zabbix_last_sync) in result_list:
                 cbis_zabbix_last_sync = self._collect_pod(cbis_pod_id=cbis_pod_id,
+                                                          cbis_pod_name=cbis_pod_name,
                                                           cbis_zabbix_url=cbis_zabbix_url,
                                                           cbis_zabbix_username=cbis_zabbix_username,
                                                           cbis_zabbix_password=cbis_zabbix_password,
@@ -598,10 +610,10 @@ class ZabbixCollector(object):
                              (cbis_zabbix_last_sync, cbis_pod_id))
                 conn.commit()
 
-    def _collect_pod(self, cbis_pod_id, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
-                     cbis_zabbix_last_sync, sync_time_till=time.time()):
+    def _collect_pod(self, cbis_pod_name, cbis_pod_id, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
+                     cbis_zabbix_last_sync):
 
-        self.log.info('connecting to zabbix url : %s' % (cbis_zabbix_url,))
+        self.log.info('connecting to %s (zabbix url : %s)' % (cbis_pod_name, cbis_zabbix_url))
 
         api = pyzabbix.ZabbixAPI(cbis_zabbix_url)
 
@@ -640,17 +652,18 @@ class ZabbixCollector(object):
         # 2 - log;
         # 3 - numeric unsigned;
         # 4 - text.
-
-        time_till = int(cbis_zabbix_last_sync) + 60 * self._period_data
+        cbis_zabbix_last_sync_time = datetime.fromtimestamp(cbis_zabbix_last_sync)
+        time_till = cbis_zabbix_last_sync_time + timedelta(minutes=self._period_data)
+        now = datetime.now()
         has_some_collected = False
-        while cbis_zabbix_last_sync < sync_time_till and time_till < sync_time_till:
+        while cbis_zabbix_last_sync_time < now and time_till < now:
             has_some_collected = True
             history_objects = []
-            time_till = int(cbis_zabbix_last_sync) + 60 * self._period_data
             for item_type in items_id_from_type:
-                self.log.info('Getting history.get from %s to %s for item_type %s' % (
-                    time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(cbis_zabbix_last_sync)),
-                    time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time_till)),
+                self.log.info('Getting (%s) history.get from %s to %s for item_type %s' % (
+                    cbis_pod_name,
+                    cbis_zabbix_last_sync_time.strftime('%Y-%m-%d %H:%M:%S'),
+                    time_till.strftime('%Y-%m-%d %H:%M:%S'),
                     item_type))
 
                 for items_id_by_chunk in util.chunks(items_id_from_type[item_type], 100):
@@ -658,19 +671,22 @@ class ZabbixCollector(object):
                         try:
                             history_objects.extend(api.history.get(itemids=items_id_by_chunk,
                                                                    history=item_type,
-                                                                   time_from=int(cbis_zabbix_last_sync),
-                                                                   time_till=time_till,
+                                                                   time_from=int(cbis_zabbix_last_sync_time.strftime('%s')),
+                                                                   time_till=int(time_till.strftime('%s')),
                                                                    sortfield=['itemid', 'clock']))
                             break
                         except Exception as e:
-                            self.log.exception('error getting history, retrying for %s [%s]' % (i, e))
+                            self.log.exception('error getting history (%s), retrying for %s [%s]' % (cbis_pod_name, i, e))
 
+            #update begin time
+            cbis_zabbix_last_sync_time = time_till
+            time_till = cbis_zabbix_last_sync_time + timedelta(minutes=self._period_data)
 
             # raw records
             row_records = []
 
             # add time_till as the sync point of time
-            all_clock_timestamp = [time_till]
+            all_clock_timestamp = [cbis_zabbix_last_sync_time.strftime('%s')]
 
             for history in history_objects:
                 item_id = history['itemid']
@@ -879,4 +895,4 @@ if __name__ == '__main__':
     logging.config.fileConfig(os.path.join(PATH, 'logging.ini'))
     client = ZabbixCollector()
     client.partition()
-    client.aggregate_hourly(now=float('1527768000'))
+    # client.collect()
