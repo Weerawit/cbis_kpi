@@ -8,18 +8,24 @@ import subprocess
 from datetime import datetime
 import kpicollector
 
+PATH = os.path.dirname(os.path.abspath(__file__))
+logging.config.fileConfig(os.path.join(PATH, 'logging.ini'))
+
+log = logging.getLogger(__name__)
+
 
 def is_process_running():
     try:
+        log.info('Current PID is %s, PPID is %s' % (os.getpid(), os.getppid()))
+
         pids = subprocess.check_output('/usr/bin/pgrep -f cbis-kpi-collect', shell=True)
 
         #pids = subprocess.check_output('/usr/bin/pgrep -f cbis_kpi', shell=True)
 
-        logging.info('Current PID is $s' % (os.getpid(),))
-        logging.info('Found running pids %s ' % (pids,))
+        log.info('Found running pids %s ' % (pids,))
 
         for pid in pids.split('\n'):
-            if int(pid) != os.getpid():
+            if int(pid) != os.getpid() and int(pid) != os.getppid():
                 return True
         return False
     except Exception as e:
@@ -27,10 +33,6 @@ def is_process_running():
 
 
 def main(args=sys.argv[1:]):
-    PATH = os.path.dirname(os.path.abspath(__file__))
-    logging.config.fileConfig(os.path.join(PATH, 'logging.ini'))
-
-    log = logging.getLogger(__name__)
 
     if is_process_running():
         log.info('Process is running, skip current execution')
