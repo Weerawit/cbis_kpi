@@ -41,32 +41,6 @@ class ZabbixReloader(object):
 
             self._item_keys = list(keys)
 
-    ### no need to partion old data (all partitions use less than (value), it will fix the last partition)
-    # def _partition_util(self, table_name):
-    #     from_date = self._from_date
-    #     to_date = self._to_date
-    #     check_date = from_date.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-    #     with util.DBConnection().get_connection() as conn:
-    #         curr = conn.cursor()
-    #         while check_date < to_date:
-    #             try:
-    #                 create_partition_sql = 'alter table %s add partition (' \
-    #                                        'partition p_%s values less than (%s))' % \
-    #                                        (table_name, check_date.strftime('%s'), check_date.strftime('%s'))
-    #                 self.log.info('checking partition for %s p_%s' % (table_name, check_date.strftime('%s'),))
-    #                 curr.execute(create_partition_sql)
-    #                 self.log.info('created partition for %s p_%s' % (table_name, check_date.strftime('%s'),))
-    #             except Exception as e:
-    #                 self.log.info('partition not found %s p_%s [%s]' % (table_name, check_date.strftime('%s'), e,))
-    #                 pass
-    #
-    #             check_date = check_date + timedelta(days=1)
-    #
-    #         conn.commit()
-
-    # def partition(self):
-    #     self._partition_util('cbis_zabbix_raw')
-
     def collect(self):
 
         self.log.info('Connecting to database')
@@ -85,15 +59,16 @@ class ZabbixReloader(object):
 
             for (cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password) in result_list:
                 self._collect_pod(cbis_pod_id=cbis_pod_id,
+                                  cbis_pod_name=cbis_pod_name,
                                   cbis_zabbix_url=cbis_zabbix_url,
                                   cbis_zabbix_username=cbis_zabbix_username,
                                   cbis_zabbix_password=cbis_zabbix_password)
 
                 conn.commit()
 
-    def _collect_pod(self, cbis_pod_id, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password):
+    def _collect_pod(self, cbis_pod_name, cbis_pod_id, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password):
 
-        self.log.info('connecting to zabbix url : %s' % (cbis_zabbix_url,))
+        self.log.info('connecting to %s (zabbix url : %s)' % (cbis_pod_name, cbis_zabbix_url))
 
         api = pyzabbix.ZabbixAPI(cbis_zabbix_url)
 
@@ -132,18 +107,18 @@ class ZabbixReloader(object):
         # 2 - log;
         # 3 - numeric unsigned;
         # 4 - text.
-
-        sync_time_till = int(self._to_date.strftime('%s'))
-        cbis_zabbix_last_sync = int(self._from_date.strftime('%s'))
+        cbis_zabbix_last_sync_time = self._from_date
+        time_till = cbis_zabbix_last_sync_time + timedelta(minutes=self._period_data)
+        now = self._to_date
         has_some_collected = False
-        while cbis_zabbix_last_sync < sync_time_till:
+        while cbis_zabbix_last_sync_time <= now and time_till <= now:
             has_some_collected = True
             history_objects = []
-            time_till = int(cbis_zabbix_last_sync) + 60 * self._period_data
             for item_type in items_id_from_type:
-                self.log.info('Getting history.get from %s to %s for item_type %s' % (
-                    time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(cbis_zabbix_last_sync)),
-                    time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time_till)),
+                self.log.info('Getting (%s) history.get from %s to %s for item_type %s' % (
+                    cbis_pod_name,
+                    cbis_zabbix_last_sync_time.strftime('%Y-%m-%d %H:%M:%S'),
+                    time_till.strftime('%Y-%m-%d %H:%M:%S'),
                     item_type))
 
                 for items_id_by_chunk in util.chunks(items_id_from_type[item_type], 100):
@@ -151,22 +126,30 @@ class ZabbixReloader(object):
                         try:
                             history_objects.extend(api.history.get(itemids=items_id_by_chunk,
                                                                    history=item_type,
-                                                                   time_from=int(cbis_zabbix_last_sync),
-                                                                   time_till=time_till,
+                                                                   time_from=int(cbis_zabbix_last_sync_time.strftime('%s')),
+                                                                   time_till=int(time_till.strftime('%s')),
                                                                    sortfield=['itemid', 'clock']))
                             break
-                        except:
-                            self.log.exception('error getting history, retrying for %s' % (i,))
+                        except Exception as e:
+                            self.log.exception('error getting history (%s), retrying for %s [%s]' % (cbis_pod_name, i, e))
 
+            #update begin time
+            cbis_zabbix_last_sync_time = time_till
+            time_till = cbis_zabbix_last_sync_time + timedelta(minutes=self._period_data)
 
             # raw records
             row_records = []
+
+            # add time_till as the sync point of time
+            all_clock_timestamp = [cbis_zabbix_last_sync_time.strftime('%s')]
 
             for history in history_objects:
                 item_id = history['itemid']
                 item = items_data[item_id]
                 value = history['value']
                 clock = history['clock']
+
+                all_clock_timestamp.append(float(history['clock']))
 
                 item_value_type = item['value_type']
 
@@ -215,7 +198,6 @@ def main(args=sys.argv[1:]):
     cbis_pod_name = args.cbis_pod_name
 
     reloader = ZabbixReloader(to_date=to_date, from_date=from_date, cbis_pod_name=cbis_pod_name)
-    # reloader.partition()
     reloader.collect()
 
 
@@ -226,7 +208,10 @@ def build_parser():
     """
     def valid_date(s):
         try:
-            return datetime.strptime(s, "%d-%m-%Y %H:%M")
+            date = datetime.strptime(s, "%d-%m-%Y %H")
+            if date >= datetime.now():
+                raise argparse.ArgumentTypeError('{0} should be less then current date'.format(s))
+            return date
         except ValueError:
             msg = "Not a valid date: '{0}'.".format(s)
             raise argparse.ArgumentTypeError(msg)
@@ -236,12 +221,12 @@ def build_parser():
         description='Reload KPI from Zabbix ')
 
     parser.add_argument('--from_date',
-                        help='From date format DD-MM-YYYY HH:MM',
+                        help='From date format DD-MM-YYYY HH',
                         required=True,
                         type=valid_date)
 
     parser.add_argument('--to_date',
-                        help='To date format DD-MM-YYYY HH:MM',
+                        help='To date format DD-MM-YYYY HH',
                         required=True,
                         type=valid_date)
 

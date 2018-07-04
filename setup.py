@@ -185,6 +185,8 @@ setup(
     entry_points={  # Optional
         'console_scripts': [
             'cbis-kpi-collect=cbis_kpi.__main__:main',
+            'cbis-kpi-reload=cbis_kpi.kpireloader:main',
+            'cbis-kpi-aggregate=cbis_kpi.kpireaggregate:main',
         ],
     },
 
