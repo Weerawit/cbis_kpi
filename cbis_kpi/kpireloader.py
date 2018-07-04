@@ -47,8 +47,6 @@ class ZabbixReloader(object):
 
         with util.DBConnection().get_connection() as conn:
 
-            self._conn = conn
-
             curr = conn.cursor()
 
             curr.execute('select cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username,'
@@ -57,20 +55,18 @@ class ZabbixReloader(object):
 
             result_list = curr.fetchall()
 
-            for (cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password) in result_list:
-                self._clean_raw(cbis_pod_id=cbis_pod_id)
+        for (cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password) in result_list:
+            with util.DBConnection().get_connection() as conn:
+                self._clean_raw(conn=conn, cbis_pod_id=cbis_pod_id)
 
-                self._collect_pod(cbis_pod_id=cbis_pod_id,
+                self._collect_pod(conn=conn,
+                                  cbis_pod_id=cbis_pod_id,
                                   cbis_pod_name=cbis_pod_name,
                                   cbis_zabbix_url=cbis_zabbix_url,
                                   cbis_zabbix_username=cbis_zabbix_username,
                                   cbis_zabbix_password=cbis_zabbix_password)
 
-                conn.commit()
-
-    def _clean_raw(self, cbis_pod_id):
-        conn = self._conn
-
+    def _clean_raw(self, conn, cbis_pod_id):
         curr = conn.cursor()
 
         clock_from = self._from_date.strftime('%s')
@@ -83,7 +79,9 @@ class ZabbixReloader(object):
                                   'clock_from': clock_from,
                                   'clock_to': clock_to})
 
-    def _collect_pod(self, cbis_pod_name, cbis_pod_id, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password):
+        conn.commit()
+
+    def _collect_pod(self, conn, cbis_pod_name, cbis_pod_id, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password):
 
         self.log.info('connecting to %s (zabbix url : %s)' % (cbis_pod_name, cbis_zabbix_url))
 
@@ -178,19 +176,17 @@ class ZabbixReloader(object):
                                     'clock': clock})
 
                 if len(row_records) > 10000:
-                    self._save_raw(row_records)
+                    self._save_raw(conn, row_records)
                     row_records = []
 
             if len(row_records) > 0:
-                self._save_raw(row_records)
+                self._save_raw(conn, row_records)
                 row_records = []
 
         if not has_some_collected:
             self.log.info('Nothing to collect since current period not full period yet. ')
 
-    def _save_raw(self, records):
-        conn = self._conn
-
+    def _save_raw(self, conn, records):
         curr = conn.cursor()
 
         curr.executemany(

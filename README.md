@@ -62,7 +62,7 @@ Installation
     password=cbis_kpi
     database=cbis_kpi
     pool_name=cbis_kpi_pool
-    pool_size=20
+    pool_size=3
 
 
     d) add crontab every 15 mins

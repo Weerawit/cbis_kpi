@@ -10,95 +10,56 @@ from datetime import timedelta, datetime
 import re
 import pyzabbix
 import json
-
+import threading
 import util
 
 
-class VirshCollector(object):
+class VirshThread(threading.Thread):
 
-    def __init__(self):
+    def __init__(self, cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username,
+                 cbis_undercloud_last_sync):
+        super(VirshThread, self).__init__()
         self.log = logging.getLogger(self.__class__.__name__)
-        self._config = util.Config()
-        self._load_config()
-        self._conn = None
+        self.cbis_pod_id = cbis_pod_id
+        self.cbis_pod_name = cbis_pod_name
+        self.cbis_undercloud_addr = cbis_undercloud_addr
+        self.cbis_undercloud_username = cbis_undercloud_username
+        self.cbis_undercloud_last_sync = cbis_undercloud_last_sync
 
-    def _load_config(self):
-        pass
-
-    def _partition_util(self, table_name, number_of_days=14):
-        tomorrow = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-        last_days = tomorrow - timedelta(days=number_of_days)
+    def run(self):
         with util.DBConnection().get_connection() as conn:
+
+            cbis_undercloud_current_sync = time.time()
+            kwargs = {'cbis_undercloud_last_sync': self.cbis_undercloud_last_sync,
+                      'cbis_pod_id': self.cbis_pod_id,
+                      'cbis_undercloud_current_sync': cbis_undercloud_current_sync,
+                      'test_flag': False,
+                      'conn' : conn}
+
+            executor = util.SshExecutor(self.cbis_undercloud_addr, self.cbis_undercloud_username, **kwargs)
+
+            executor.run('compute-*',
+                         'sudo ip link; sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh dumpxml \\\" \$2)}\"',
+                         callback=self._callback_dumpxml)
+
+            executor.run('undercloud',
+                         'source /home/stack/overcloudrc;openstack project list -f json;nova list --all --fields host,name,instance_name,tenant_id',
+                         callback=self._callback_novalist)
+
+            executor.run('compute-*',
+                         'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh domstats \\\" \$2)}\"',
+                         callback=self._callback_stat)
+
+            executor.run('compute-*',
+                         'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ print \\\"Domain: \\\" \$2; system(\\\"sudo virsh dommemstat \\\" \$2)}\"',
+                         callback=self._callback_memstat)
+
             curr = conn.cursor()
 
-            try:
-                create_partition_sql = 'alter table %s add partition (' \
-                                       'partition p_%s values less than (%s))' % \
-                                       (table_name, tomorrow.strftime('%s'), tomorrow.strftime('%s'))
-                self.log.info('checking partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-                curr.execute(create_partition_sql)
-                self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-            except Exception as e:
-                self.log.info('partition not found %s p_%s [%s]' % (table_name, tomorrow.strftime('%s'), e))
-                pass
+            curr.execute('update cbis_pod set cbis_undercloud_last_sync = %s where cbis_pod_id = %s',
+                     (cbis_undercloud_current_sync, self.cbis_pod_id))
 
-            try:
-                drop_partition_sql = 'alter table %s drop partition p_%s' % (table_name, last_days.strftime('%s'),)
-                self.log.info('checking partition to delete for %s p_%s' % (table_name, last_days.strftime('%s'),))
-                curr.execute(drop_partition_sql)
-                self.log.info('dropped partition for %s p_%s' % (table_name, last_days.strftime('%s'),))
-            except Exception as e:
-                self.log.info('partition not found %s p_%s [%s]' % (table_name, last_days.strftime('%s'), e))
-                pass
             conn.commit()
-
-    def partition(self):
-        self._partition_util('cbis_virsh_stat_raw', 14)
-        self._partition_util('cbis_virsh_stat_hour', 90)
-        self._partition_util('cbis_virsh_stat_day', 365)
-
-    def collect(self):
-        self.log.info('Connecting to database')
-
-        with util.DBConnection().get_connection() as conn:
-
-            self._conn = conn
-
-            curr = conn.cursor()
-
-            curr.execute('select cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username,'
-                         'cbis_undercloud_last_sync from cbis_pod where enable=1')
-            result_list = curr.fetchall()
-
-            for (cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username,
-                 cbis_undercloud_last_sync) in result_list:
-                cbis_undercloud_current_sync = time.time()
-                kwargs = {'cbis_undercloud_last_sync': cbis_undercloud_last_sync,
-                          'cbis_pod_id': cbis_pod_id,
-                          'cbis_undercloud_current_sync': cbis_undercloud_current_sync,
-                          'test_flag': False}
-
-                executor = util.SshExecutor(cbis_undercloud_addr, cbis_undercloud_username, **kwargs)
-
-                executor.run('compute-*',
-                             'sudo ip link; sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh dumpxml \\\" \$2)}\"',
-                             callback=self._callback_dumpxml)
-
-                executor.run('undercloud',
-                             'source /home/stack/overcloudrc;openstack project list -f json;nova list --all --fields host,name,instance_name,tenant_id',
-                             callback=self._callback_novalist)
-
-                executor.run('compute-*',
-                             'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh domstats \\\" \$2)}\"',
-                             callback=self._callback_stat)
-
-                executor.run('compute-*',
-                             'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ print \\\"Domain: \\\" \$2; system(\\\"sudo virsh dommemstat \\\" \$2)}\"',
-                             callback=self._callback_memstat)
-
-                curr.execute('update cbis_pod set cbis_undercloud_last_sync = %s where cbis_pod_id = %s',
-                             (cbis_undercloud_current_sync, cbis_pod_id))
-                conn.commit()
 
     def _callback_novalist(self, hostname, line_each_node, **kwargs):
         cbis_pod_id = kwargs.get('cbis_pod_id')
@@ -124,7 +85,7 @@ class VirshCollector(object):
                                 'project_name': project_name,
                                 'domain_name': domain_name})
 
-        conn = self._conn
+        conn = kwargs.get('conn')
 
         curr = conn.cursor()
 
@@ -170,37 +131,39 @@ class VirshCollector(object):
                 except IndexError:
                     pass
 
-        conn = self._conn
+        with util.DBConnection().get_connection() as conn:
 
-        curr = conn.cursor()
+            curr = conn.cursor()
 
-        delete_sql = 'delete from cbis_virsh_list where cbis_pod_id = %(cbis_pod_id)s and hostname = %(hostname)s'
+            delete_sql = 'delete from cbis_virsh_list where cbis_pod_id = %(cbis_pod_id)s and hostname = %(hostname)s'
 
-        curr.execute(delete_sql, {'cbis_pod_id': cbis_pod_id,
-                                  'hostname': hostname})
+            curr.execute(delete_sql, {'cbis_pod_id': cbis_pod_id,
+                                      'hostname': hostname})
 
-        delete_sql = 'delete from cbis_virsh_meta where cbis_pod_id = %(cbis_pod_id)s and hostname = %(hostname)s'
+            delete_sql = 'delete from cbis_virsh_meta where cbis_pod_id = %(cbis_pod_id)s and hostname = %(hostname)s'
 
-        curr.execute(delete_sql, {'cbis_pod_id': cbis_pod_id,
-                                  'hostname': hostname})
+            curr.execute(delete_sql, {'cbis_pod_id': cbis_pod_id,
+                                      'hostname': hostname})
 
-        #metadata for nic
-        meta_records = []
-        for virsh_list_record in virsh_list_records:
-            for nic in virsh_list_record.pop('physical_nic'):
-                meta_records.append({'cbis_pod_id': virsh_list_record.get('cbis_pod_id'),
-                                     'hostname': virsh_list_record.get('hostname'),
-                                     'domain_name': virsh_list_record.get('domain_name'),
-                                     'meta_key': 'nic',
-                                     'meta_value': nic})
+            #metadata for nic
+            meta_records = []
+            for virsh_list_record in virsh_list_records:
+                for nic in virsh_list_record.pop('physical_nic'):
+                    meta_records.append({'cbis_pod_id': virsh_list_record.get('cbis_pod_id'),
+                                         'hostname': virsh_list_record.get('hostname'),
+                                         'domain_name': virsh_list_record.get('domain_name'),
+                                         'meta_key': 'nic',
+                                         'meta_value': nic})
 
-        insert_sql = 'insert into cbis_virsh_list (cbis_pod_id, hostname, domain_name, vm_name, vm_flavor, vm_vcpu, vm_memory, vm_numa) ' \
-                     'values (%(cbis_pod_id)s, %(hostname)s, %(domain_name)s, %(vm_name)s, %(vm_flavor)s, %(vm_vcpu)s, %(vm_memory)s, %(vm_numa)s)'
-        curr.executemany(insert_sql, virsh_list_records)
+            insert_sql = 'insert into cbis_virsh_list (cbis_pod_id, hostname, domain_name, vm_name, vm_flavor, vm_vcpu, vm_memory, vm_numa) ' \
+                         'values (%(cbis_pod_id)s, %(hostname)s, %(domain_name)s, %(vm_name)s, %(vm_flavor)s, %(vm_vcpu)s, %(vm_memory)s, %(vm_numa)s)'
+            curr.executemany(insert_sql, virsh_list_records)
 
-        insert_sql = 'insert into cbis_virsh_meta (cbis_pod_id, hostname, domain_name, meta_key, meta_value) ' \
-                     'values (%(cbis_pod_id)s, %(hostname)s, %(domain_name)s, %(meta_key)s, %(meta_value)s)'
-        curr.executemany(insert_sql, meta_records)
+            insert_sql = 'insert into cbis_virsh_meta (cbis_pod_id, hostname, domain_name, meta_key, meta_value) ' \
+                         'values (%(cbis_pod_id)s, %(hostname)s, %(domain_name)s, %(meta_key)s, %(meta_value)s)'
+            curr.executemany(insert_sql, meta_records)
+
+            conn.commit()
 
     def _parse_xml(self, hostname, domain_xml, **kwargs):
         cbis_pod_id = kwargs.get('cbis_pod_id')
@@ -302,7 +265,7 @@ class VirshCollector(object):
         params.append(cbis_pod_id)
         params.append(cbis_undercloud_last_sync)
 
-        conn = self._conn
+        conn = kwargs.get('conn')
 
         curr = conn.cursor()
 
@@ -389,7 +352,7 @@ class VirshCollector(object):
         params.append(cbis_pod_id)
         params.append(cbis_undercloud_last_sync)
 
-        conn = self._conn
+        conn = kwargs.get('conn')
 
         curr = conn.cursor()
 
@@ -424,6 +387,78 @@ class VirshCollector(object):
                      'values (%(cbis_pod_id)s, %(domain_name)s, %(item_key)s, %(item_value)s, %(item_delta)s, %(clock)s, %(clock_delta)s)'
         curr.executemany(insert_sql, cbis_virsh_stat_raw_values)
 
+
+class VirshCollector(object):
+
+    def __init__(self):
+        self.log = logging.getLogger(self.__class__.__name__)
+        self._config = util.Config()
+        self._load_config()
+        self._conn = None
+
+    def _load_config(self):
+        pass
+
+    def _partition_util(self, table_name, number_of_days=14):
+        tomorrow = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        last_days = tomorrow - timedelta(days=number_of_days)
+        with util.DBConnection().get_connection() as conn:
+            curr = conn.cursor()
+
+            try:
+                create_partition_sql = 'alter table %s add partition (' \
+                                       'partition p_%s values less than (%s))' % \
+                                       (table_name, tomorrow.strftime('%s'), tomorrow.strftime('%s'))
+                self.log.info('checking partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+                curr.execute(create_partition_sql)
+                self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+            except Exception as e:
+                self.log.info('partition not found %s p_%s [%s]' % (table_name, tomorrow.strftime('%s'), e))
+                pass
+
+            try:
+                drop_partition_sql = 'alter table %s drop partition p_%s' % (table_name, last_days.strftime('%s'),)
+                self.log.info('checking partition to delete for %s p_%s' % (table_name, last_days.strftime('%s'),))
+                curr.execute(drop_partition_sql)
+                self.log.info('dropped partition for %s p_%s' % (table_name, last_days.strftime('%s'),))
+            except Exception as e:
+                self.log.info('partition not found %s p_%s [%s]' % (table_name, last_days.strftime('%s'), e))
+                pass
+            conn.commit()
+
+    def partition(self):
+        self._partition_util('cbis_virsh_stat_raw', 14)
+        self._partition_util('cbis_virsh_stat_hour', 90)
+        self._partition_util('cbis_virsh_stat_day', 365)
+
+    def collect(self):
+        self.log.info('Connecting to database')
+
+        with util.DBConnection().get_connection() as conn:
+
+            self._conn = conn
+
+            curr = conn.cursor()
+
+            curr.execute('select cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username,'
+                         'cbis_undercloud_last_sync from cbis_pod where enable=1')
+            result_list = curr.fetchall()
+
+        all_thread = []
+
+        for (cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username,
+             cbis_undercloud_last_sync) in result_list:
+            thread = VirshThread(cbis_pod_id=cbis_pod_id,
+                                 cbis_pod_name=cbis_pod_name,
+                                 cbis_undercloud_addr=cbis_undercloud_addr,
+                                 cbis_undercloud_username=cbis_undercloud_username,
+                                 cbis_undercloud_last_sync=cbis_undercloud_last_sync)
+            all_thread.append(thread)
+
+        for t in all_thread:
+            t.start()
+        for t in all_thread:
+            t.join()
 
     def aggregate_hourly(self, now=time.time()):
         last_hour = datetime.fromtimestamp(now).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
@@ -512,6 +547,149 @@ class VirshCollector(object):
             conn.commit()
 
 
+class ZabbixThread(threading.Thread):
+
+    def __init__(self, cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
+             cbis_zabbix_last_sync, item_keys, period_data):
+        super(ZabbixThread, self).__init__()
+        self.log = logging.getLogger(self.__class__.__name__)
+        self.cbis_pod_id = cbis_pod_id
+        self.cbis_pod_name = cbis_pod_name
+        self.cbis_zabbix_url = cbis_zabbix_url
+        self.cbis_zabbix_username = cbis_zabbix_username
+        self.cbis_zabbix_password =cbis_zabbix_password
+        self.cbis_zabbix_last_sync = cbis_zabbix_last_sync
+        self.item_keys = item_keys
+        self.period_data = period_data
+
+    def run(self):
+        with util.DBConnection().get_connection() as conn:
+            self._collect_pod(conn)
+
+    def _collect_pod(self, conn):
+
+        self.log.info('connecting to %s (zabbix url : %s)' % (self.cbis_pod_name, self.cbis_zabbix_url))
+
+        api = pyzabbix.ZabbixAPI(self.cbis_zabbix_url)
+
+        api.session.verify = False
+        api.login(user=self.cbis_zabbix_username, password=self.cbis_zabbix_password)
+
+        hosts = api.host.get(output=['name', 'hostid'], search={'name': 'overcloud-'})
+
+        host_ids = []
+        host_data = {}
+
+        for host in hosts:
+            host_id = host['hostid']
+            host_ids.append(host_id)
+            host_data[host_id] = host
+
+        items = api.item.get(hostids=host_ids,
+                             monitored=True,
+                             filter={'key_': self.item_keys},
+                             output=['name', 'key_', 'value_type', 'hostid', 'units'])
+
+        items_id_from_type = collections.defaultdict(list)
+
+        items_data = {}
+        for item in items:
+            item_id = item['itemid']
+
+            items_id_from_type[item['value_type']].append(item_id)
+
+            items_data[item_id] = item
+            item['hostname'] = host_data[item['hostid']]['name']
+
+        # Possible values:
+        # 0 - numeric float;
+        # 1 - character;
+        # 2 - log;
+        # 3 - numeric unsigned;
+        # 4 - text.
+        cbis_zabbix_last_sync_time = datetime.fromtimestamp(self.cbis_zabbix_last_sync)
+        time_till = cbis_zabbix_last_sync_time + timedelta(minutes=self.period_data)
+        now = datetime.now()
+        has_some_collected = False
+        while cbis_zabbix_last_sync_time < now and time_till < now:
+            has_some_collected = True
+            history_objects = []
+            for item_type in items_id_from_type:
+                self.log.info('Getting (%s) history.get from %s to %s for item_type %s' % (
+                    self.cbis_pod_name,
+                    cbis_zabbix_last_sync_time.strftime('%Y-%m-%d %H:%M:%S'),
+                    time_till.strftime('%Y-%m-%d %H:%M:%S'),
+                    item_type))
+
+                for items_id_by_chunk in util.chunks(items_id_from_type[item_type], 100):
+                    for i in range(4):
+                        try:
+                            history_objects.extend(api.history.get(itemids=items_id_by_chunk,
+                                                                   history=item_type,
+                                                                   time_from=int(cbis_zabbix_last_sync_time.strftime('%s')),
+                                                                   time_till=int(time_till.strftime('%s')),
+                                                                   sortfield=['itemid', 'clock']))
+                            break
+                        except Exception as e:
+                            self.log.exception('error getting history (%s), retrying for %s [%s]' % (self.cbis_pod_name, i, e))
+
+            #update begin time
+            cbis_zabbix_last_sync_time = time_till
+            time_till = cbis_zabbix_last_sync_time + timedelta(minutes=self.period_data)
+
+            # raw records
+            row_records = []
+
+            # add time_till as the sync point of time
+            all_clock_timestamp = [cbis_zabbix_last_sync_time.strftime('%s')]
+
+            for history in history_objects:
+                item_id = history['itemid']
+                item = items_data[item_id]
+                value = history['value']
+                clock = history['clock']
+
+                all_clock_timestamp.append(float(history['clock']))
+
+                item_value_type = item['value_type']
+
+                row_records.append({'cbis_pod_id': self.cbis_pod_id,
+                                    'hostname': item['hostname'],
+                                    'item_key': item['key_'],
+                                    'item_value': value,
+                                    'item_unit': item['units'],
+                                    'clock': clock})
+
+                if len(row_records) > 10000:
+                    self._save_raw(conn, row_records)
+                    row_records = []
+
+            if len(row_records) > 0:
+                self._save_raw(conn, row_records)
+                row_records = []
+
+            # mark last sync time
+            if len(all_clock_timestamp) > 0:
+                cbis_zabbix_last_sync = max(all_clock_timestamp)
+
+            #commit
+            curr = conn.cursor()
+            curr.execute('update cbis_pod set cbis_zabbix_last_sync = %s where cbis_pod_id = %s',
+                         (cbis_zabbix_last_sync, self.cbis_pod_id))
+            conn.commit()
+
+        if not has_some_collected:
+            self.log.info('Nothing to collect since current period not full period yet. ')
+
+    def _save_raw(self, conn, records):
+        curr = conn.cursor()
+
+        curr.executemany(
+            'INSERT INTO cbis_zabbix_raw (cbis_pod_id, hostname, item_key, item_value, item_unit, clock) '
+            'VALUES (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_value)s, %(item_unit)s, %(clock)s)',
+            records)
+
+
 class ZabbixCollector(object):
 
     def __init__(self):
@@ -586,6 +764,8 @@ class ZabbixCollector(object):
     def collect(self):
         self.log.info('Connecting to database')
 
+        result_list = []
+
         with util.DBConnection().get_connection() as conn:
 
             self._conn = conn
@@ -597,140 +777,26 @@ class ZabbixCollector(object):
 
             result_list = curr.fetchall()
 
-            for (cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
-                 cbis_zabbix_last_sync) in result_list:
-                cbis_zabbix_last_sync = self._collect_pod(cbis_pod_id=cbis_pod_id,
-                                                          cbis_pod_name=cbis_pod_name,
-                                                          cbis_zabbix_url=cbis_zabbix_url,
-                                                          cbis_zabbix_username=cbis_zabbix_username,
-                                                          cbis_zabbix_password=cbis_zabbix_password,
-                                                          cbis_zabbix_last_sync=cbis_zabbix_last_sync)
+        all_thread = []
 
-                curr.execute('update cbis_pod set cbis_zabbix_last_sync = %s where cbis_pod_id = %s',
-                             (cbis_zabbix_last_sync, cbis_pod_id))
-                conn.commit()
+        for (cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
+             cbis_zabbix_last_sync) in result_list:
 
-    def _collect_pod(self, cbis_pod_name, cbis_pod_id, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password,
-                     cbis_zabbix_last_sync):
+            thread = ZabbixThread(cbis_pod_id=cbis_pod_id,
+                                  cbis_pod_name=cbis_pod_name,
+                                  cbis_zabbix_url=cbis_zabbix_url,
+                                  cbis_zabbix_username=cbis_zabbix_username,
+                                  cbis_zabbix_password=cbis_zabbix_password,
+                                  cbis_zabbix_last_sync=cbis_zabbix_last_sync,
+                                  item_keys=self._item_keys,
+                                  period_data=self._period_data)
 
-        self.log.info('connecting to %s (zabbix url : %s)' % (cbis_pod_name, cbis_zabbix_url))
+            all_thread.append(thread)
 
-        api = pyzabbix.ZabbixAPI(cbis_zabbix_url)
-
-        api.session.verify = False
-        api.login(user=cbis_zabbix_username, password=cbis_zabbix_password)
-
-        hosts = api.host.get(output=['name', 'hostid'], search={'name': 'overcloud-'})
-
-        host_ids = []
-        host_data = {}
-
-        for host in hosts:
-            host_id = host['hostid']
-            host_ids.append(host_id)
-            host_data[host_id] = host
-
-        items = api.item.get(hostids=host_ids,
-                             monitored=True,
-                             filter={'key_': self._item_keys},
-                             output=['name', 'key_', 'value_type', 'hostid', 'units'])
-
-        items_id_from_type = collections.defaultdict(list)
-
-        items_data = {}
-        for item in items:
-            item_id = item['itemid']
-
-            items_id_from_type[item['value_type']].append(item_id)
-
-            items_data[item_id] = item
-            item['hostname'] = host_data[item['hostid']]['name']
-
-        # Possible values:
-        # 0 - numeric float;
-        # 1 - character;
-        # 2 - log;
-        # 3 - numeric unsigned;
-        # 4 - text.
-        cbis_zabbix_last_sync_time = datetime.fromtimestamp(cbis_zabbix_last_sync)
-        time_till = cbis_zabbix_last_sync_time + timedelta(minutes=self._period_data)
-        now = datetime.now()
-        has_some_collected = False
-        while cbis_zabbix_last_sync_time < now and time_till < now:
-            has_some_collected = True
-            history_objects = []
-            for item_type in items_id_from_type:
-                self.log.info('Getting (%s) history.get from %s to %s for item_type %s' % (
-                    cbis_pod_name,
-                    cbis_zabbix_last_sync_time.strftime('%Y-%m-%d %H:%M:%S'),
-                    time_till.strftime('%Y-%m-%d %H:%M:%S'),
-                    item_type))
-
-                for items_id_by_chunk in util.chunks(items_id_from_type[item_type], 100):
-                    for i in range(4):
-                        try:
-                            history_objects.extend(api.history.get(itemids=items_id_by_chunk,
-                                                                   history=item_type,
-                                                                   time_from=int(cbis_zabbix_last_sync_time.strftime('%s')),
-                                                                   time_till=int(time_till.strftime('%s')),
-                                                                   sortfield=['itemid', 'clock']))
-                            break
-                        except Exception as e:
-                            self.log.exception('error getting history (%s), retrying for %s [%s]' % (cbis_pod_name, i, e))
-
-            #update begin time
-            cbis_zabbix_last_sync_time = time_till
-            time_till = cbis_zabbix_last_sync_time + timedelta(minutes=self._period_data)
-
-            # raw records
-            row_records = []
-
-            # add time_till as the sync point of time
-            all_clock_timestamp = [cbis_zabbix_last_sync_time.strftime('%s')]
-
-            for history in history_objects:
-                item_id = history['itemid']
-                item = items_data[item_id]
-                value = history['value']
-                clock = history['clock']
-
-                all_clock_timestamp.append(float(history['clock']))
-
-                item_value_type = item['value_type']
-
-                row_records.append({'cbis_pod_id': cbis_pod_id,
-                                    'hostname': item['hostname'],
-                                    'item_key': item['key_'],
-                                    'item_value': value,
-                                    'item_unit': item['units'],
-                                    'clock': clock})
-
-                if len(row_records) > 10000:
-                    self._save_raw(row_records)
-                    row_records = []
-
-            if len(row_records) > 0:
-                self._save_raw(row_records)
-                row_records = []
-
-            # mark last sync time
-            if len(all_clock_timestamp) > 0:
-                cbis_zabbix_last_sync = max(all_clock_timestamp)
-
-        if not has_some_collected:
-            self.log.info('Nothing to collect since current period not full period yet. ')
-
-        return cbis_zabbix_last_sync
-
-    def _save_raw(self, records):
-        conn = self._conn
-
-        curr = conn.cursor()
-
-        curr.executemany(
-            'INSERT INTO cbis_zabbix_raw (cbis_pod_id, hostname, item_key, item_value, item_unit, clock) '
-            'VALUES (%(cbis_pod_id)s, %(hostname)s, %(item_key)s, %(item_value)s, %(item_unit)s, %(clock)s)',
-            records)
+        for t in all_thread:
+            t.start()
+        for t in all_thread:
+            t.join()
 
     def aggregate_hourly(self, now=time.time()):
         last_hour = datetime.fromtimestamp(now).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
@@ -821,38 +887,30 @@ class ZabbixCollector(object):
             conn.commit()
 
 
-class CephDiskCollect(object):
+class CephDiskThread(threading.Thread):
 
-    def __init__(self):
-        self.log = logging.getLogger(self.__class__.__name__)
-        self._config = util.Config()
-        self._conn = None
+    def __init__(self, cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username):
+        super(CephDiskThread, self).__init__()
+        self.cbis_pod_id = cbis_pod_id
+        self.cbis_pod_name = cbis_pod_name
+        self.cbis_undercloud_addr = cbis_undercloud_addr
+        self.cbis_undercloud_username = cbis_undercloud_username
 
-    def collect(self):
-        self.log.info('Connecting to database')
+    def run(self):
 
         with util.DBConnection().get_connection() as conn:
 
-            self._conn = conn
+            kwargs = {'cbis_pod_id': self.cbis_pod_id,
+                      'test_flag': False,
+                      'conn': conn}
 
-            curr = conn.cursor()
+            executor = util.SshExecutor(self.cbis_undercloud_addr, self.cbis_undercloud_username, **kwargs)
 
-            curr.execute('select cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username '
-                         'from cbis_pod where enable=1')
+            executor.run('cephstorage-*',
+                         'sudo ceph-disk list | grep osd',
+                         callback=self._callback_cephdisk)
 
-            result_list = curr.fetchall()
-
-            for (cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username) in result_list:
-                kwargs = {'cbis_pod_id': cbis_pod_id,
-                          'test_flag': False}
-
-                executor = util.SshExecutor(cbis_undercloud_addr, cbis_undercloud_username, **kwargs)
-
-                executor.run('cephstorage-*',
-                             'sudo ceph-disk list | grep osd',
-                             callback=self._callback_cephdisk)
-
-                conn.commit()
+            conn.commit()
 
     def _callback_cephdisk(self, hostname, line_each_node, **kwargs):
         domain_name = None
@@ -873,7 +931,8 @@ class CephDiskCollect(object):
                                            'disk': disk,
                                            'osd': osd,
                                            'journal': journal})
-        conn = self._conn
+
+        conn = kwargs.get('conn')
 
         curr = conn.cursor()
 
@@ -890,9 +949,45 @@ class CephDiskCollect(object):
             curr.executemany(insert_sql, ceph_list_recoreds)
 
 
+class CephDiskCollect(object):
+
+    def __init__(self):
+        self.log = logging.getLogger(self.__class__.__name__)
+        self._config = util.Config()
+        self._conn = None
+
+    def collect(self):
+        self.log.info('Connecting to database')
+
+        result_list = []
+
+        with util.DBConnection().get_connection() as conn:
+
+            curr = conn.cursor()
+
+            curr.execute('select cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username '
+                         'from cbis_pod where enable=1')
+
+            result_list = curr.fetchall()
+
+        all_thread = []
+
+        for (cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username) in result_list:
+            thread = CephDiskThread(cbis_pod_id=cbis_pod_id,
+                                    cbis_pod_name=cbis_pod_name,
+                                    cbis_undercloud_addr=cbis_undercloud_addr,
+                                    cbis_undercloud_username=cbis_undercloud_username)
+            all_thread.append(thread)
+
+        for t in all_thread:
+            t.start()
+        for t in all_thread:
+            t.join()
+
+
 if __name__ == '__main__':
     PATH = os.path.dirname(os.path.abspath(__file__))
     logging.config.fileConfig(os.path.join(PATH, 'logging.ini'))
-    client = ZabbixCollector()
-    client.partition()
-    # client.collect()
+    client = CephDiskCollect()
+    # client.partition()
+    client.collect()
