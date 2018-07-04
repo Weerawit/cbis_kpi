@@ -58,6 +58,8 @@ class ZabbixReloader(object):
             result_list = curr.fetchall()
 
             for (cbis_pod_id, cbis_pod_name, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password) in result_list:
+                self._clean_raw(cbis_pod_id=cbis_pod_id)
+
                 self._collect_pod(cbis_pod_id=cbis_pod_id,
                                   cbis_pod_name=cbis_pod_name,
                                   cbis_zabbix_url=cbis_zabbix_url,
@@ -65,6 +67,21 @@ class ZabbixReloader(object):
                                   cbis_zabbix_password=cbis_zabbix_password)
 
                 conn.commit()
+
+    def _clean_raw(self, cbis_pod_id):
+        conn = self._conn
+
+        curr = conn.cursor()
+
+        clock_from = self._from_date.strftime('%s')
+
+        clock_to = self._to_date.strftime('%s')
+
+        delete_sql = 'delete from cbis_zabbix_raw where cbis_pod_id = %(cbis_pod_id)s and clock >= %(clock_from)s and clock <= %(clock_to)s'
+
+        curr.execute(delete_sql, {'cbis_pod_id': cbis_pod_id,
+                                  'clock_from': clock_from,
+                                  'clock_to': clock_to})
 
     def _collect_pod(self, cbis_pod_name, cbis_pod_id, cbis_zabbix_url, cbis_zabbix_username, cbis_zabbix_password):
 
