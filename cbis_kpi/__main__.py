@@ -11,9 +11,12 @@ import kpicollector
 
 def is_process_running():
     try:
-        pids = subprocess.check_output('pgrep -f cbis-kpi-collect', shell=True)
+        pids = subprocess.check_output('/usr/bin/pgrep -f cbis-kpi-collect', shell=True)
 
-        #pids = subprocess.check_output('pgrep -f cbis_kpi', shell=True)
+        #pids = subprocess.check_output('/usr/bin/pgrep -f cbis_kpi', shell=True)
+
+        logging.info('Current PID is $s' % (os.getpid(),))
+        logging.info('Found running pids %s ' % (pids,))
 
         for pid in pids.split('\n'):
             if int(pid) != os.getpid():
