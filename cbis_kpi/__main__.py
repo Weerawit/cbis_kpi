@@ -4,9 +4,17 @@ import os
 import logging
 import threading
 import time
-import argparse
+import subprocess
 from datetime import datetime
 import kpicollector
+
+
+def is_process_running():
+    try:
+        subprocess.check_output('pgrep -f cbis-kpi-collect', shell=True)
+        return True
+    except Exception:
+        return False
 
 
 def main(args=sys.argv[1:]):
@@ -14,6 +22,10 @@ def main(args=sys.argv[1:]):
     logging.config.fileConfig(os.path.join(PATH, 'logging.ini'))
 
     log = logging.getLogger(__name__)
+
+    if is_process_running():
+        log.info('Process is running, skip current execution')
+        return -1
 
     # arg_parser = build_parser()
     # args = arg_parser.parse_args(args)
