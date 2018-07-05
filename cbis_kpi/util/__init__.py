@@ -78,8 +78,15 @@ class DBConnection(object):
             else:
                 config_dict[key] = value
 
-        pool_name = config_dict.pop('pool_name')
-        pool_size = config_dict.pop('pool_size')
+        try:
+            pool_name = config_dict.pop('pool_name')
+        except KeyError:
+            pool_name = None
+
+        try:
+            pool_size = config_dict.pop('pool_size')
+        except KeyError:
+            pool_size = 5
 
         try:
 
