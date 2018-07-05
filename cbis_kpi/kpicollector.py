@@ -73,17 +73,20 @@ class VirshThread(threading.Thread):
             line = lines[i]
             i += 1
             if 'overcloud-compute-' in line:
-                values = line.split('|')
-                domain_name = values[4].strip()
-                tenent_id = values[5].strip()
-                project_name = ''
-                for project in project_list:
-                    if tenent_id in project.get('ID'):
-                        project_name = project.get('Name')
+                try:
+                    values = line.split('|')
+                    domain_name = values[4].strip()
+                    tenent_id = values[5].strip()
+                    project_name = ''
+                    for project in project_list:
+                        if tenent_id in project.get('ID'):
+                            project_name = project.get('Name')
 
-                records.append({'cbis_pod_id': cbis_pod_id,
-                                'project_name': project_name,
-                                'domain_name': domain_name})
+                    records.append({'cbis_pod_id': cbis_pod_id,
+                                    'project_name': project_name,
+                                    'domain_name': domain_name})
+                except IndexError:
+                    pass
 
         conn = kwargs.get('conn')
 
@@ -405,25 +408,44 @@ class VirshCollector(object):
         with util.DBConnection().get_connection() as conn:
             curr = conn.cursor()
 
-            try:
-                create_partition_sql = 'alter table %s add partition (' \
-                                       'partition p_%s values less than (%s))' % \
-                                       (table_name, tomorrow.strftime('%s'), tomorrow.strftime('%s'))
-                self.log.info('checking partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-                curr.execute(create_partition_sql)
-                self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-            except Exception as e:
-                self.log.info('partition not found %s p_%s [%s]' % (table_name, tomorrow.strftime('%s'), e))
-                pass
+            create_partition_name = 'p_%s' % (tomorrow.strftime('%s'),)
 
-            try:
-                drop_partition_sql = 'alter table %s drop partition p_%s' % (table_name, last_days.strftime('%s'),)
-                self.log.info('checking partition to delete for %s p_%s' % (table_name, last_days.strftime('%s'),))
-                curr.execute(drop_partition_sql)
-                self.log.info('dropped partition for %s p_%s' % (table_name, last_days.strftime('%s'),))
-            except Exception as e:
-                self.log.info('partition not found %s p_%s [%s]' % (table_name, last_days.strftime('%s'), e))
-                pass
+            query_partition_sql = 'explain partitions select * from %s' % (table_name,)
+            curr.execute(query_partition_sql)
+            partition_list = curr.fetchone()[3]
+            found_created_partition = False
+            for partition_name in partition_list.split(','):
+                if 'p_0' in partition_name:
+                    continue
+                if create_partition_name in partition_name:
+                    found_created_partition = True
+                partition_name = partition_name.replace('p_', '')
+                partition_time = datetime.fromtimestamp(float(partition_name))
+                if partition_time < last_days:
+                    try:
+                        drop_partition_sql = 'alter table %s drop partition p_%s' % (
+                        table_name, partition_time.strftime('%s'),)
+                        self.log.info(
+                            'checking partition to delete for %s p_%s' % (table_name, partition_time.strftime('%s')))
+
+                        curr.execute(drop_partition_sql)
+                        self.log.info('dropped partition for %s p_%s' % (table_name, partition_time.strftime('%s'),))
+                    except Exception as e:
+                        self.log.info('partition not found %s p_%s [%s]' % (table_name, partition_time.strftime('%s'), e))
+                    pass
+
+            if not found_created_partition:
+                try:
+                    create_partition_sql = 'alter table %s add partition (' \
+                                           'partition p_%s values less than (%s))' % \
+                                           (table_name, tomorrow.strftime('%s'), tomorrow.strftime('%s'))
+                    self.log.info('checking partition to create for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+                    curr.execute(create_partition_sql)
+                    self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+                except Exception as e:
+                    self.log.info('partition has been created %s p_%s [%s]' % (table_name, tomorrow.strftime('%s'), e))
+                    pass
+
             conn.commit()
 
     def partition(self):
@@ -723,23 +745,17 @@ class ZabbixCollector(object):
         with util.DBConnection().get_connection() as conn:
             curr = conn.cursor()
 
-            try:
-                create_partition_sql = 'alter table %s add partition (' \
-                                       'partition p_%s values less than (%s))' % \
-                                       (table_name, tomorrow.strftime('%s'), tomorrow.strftime('%s'))
-                self.log.info('checking partition to create for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-                curr.execute(create_partition_sql)
-                self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-            except Exception as e:
-                self.log.info('partition has been created %s p_%s [%s]' % (table_name, tomorrow.strftime('%s'), e))
-                pass
+            create_partition_name = 'p_%s' % (tomorrow.strftime('%s'),)
 
             query_partition_sql = 'explain partitions select * from %s' % (table_name,)
             curr.execute(query_partition_sql)
             partition_list = curr.fetchone()[3]
+            found_created_partition = False
             for partition_name in partition_list.split(','):
                 if 'p_0' in partition_name:
                     continue
+                if create_partition_name in partition_name:
+                    found_created_partition = True
                 partition_name = partition_name.replace('p_', '')
                 partition_time = datetime.fromtimestamp(float(partition_name))
                 if partition_time < last_days:
@@ -754,6 +770,19 @@ class ZabbixCollector(object):
                     except Exception as e:
                         self.log.info('partition not found %s p_%s [%s]' % (table_name, partition_time.strftime('%s'), e))
                     pass
+
+            if not found_created_partition:
+                try:
+                    create_partition_sql = 'alter table %s add partition (' \
+                                           'partition p_%s values less than (%s))' % \
+                                           (table_name, tomorrow.strftime('%s'), tomorrow.strftime('%s'))
+                    self.log.info('checking partition to create for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+                    curr.execute(create_partition_sql)
+                    self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+                except Exception as e:
+                    self.log.info('partition has been created %s p_%s [%s]' % (table_name, tomorrow.strftime('%s'), e))
+                    pass
+
             conn.commit()
 
     def partition(self):
@@ -921,16 +950,19 @@ class CephDiskThread(threading.Thread):
             if not line:
                 continue
             else:
-                line = line.strip()
-                values = line.split(',')
-                disk = values[0].split()[0]
-                osd = values[3].strip()
-                journal = values[4].split()[1]
-                ceph_list_recoreds.append({'cbis_pod_id': cbis_pod_id,
-                                           'hostname': hostname,
-                                           'disk': disk,
-                                           'osd': osd,
-                                           'journal': journal})
+                try:
+                    line = line.strip()
+                    values = line.split(',')
+                    disk = values[0].split()[0]
+                    osd = values[3].strip()
+                    journal = values[4].split()[1]
+                    ceph_list_recoreds.append({'cbis_pod_id': cbis_pod_id,
+                                               'hostname': hostname,
+                                               'disk': disk,
+                                               'osd': osd,
+                                               'journal': journal})
+                except IndexError:
+                    pass
 
         conn = kwargs.get('conn')
 
