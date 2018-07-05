@@ -34,10 +34,6 @@ def is_process_running():
 
 def main(args=sys.argv[1:]):
 
-    if is_process_running():
-        log.info('Process is running, skip current execution')
-        return -1
-
     # arg_parser = build_parser()
     # args = arg_parser.parse_args(args)
     #
@@ -71,13 +67,16 @@ def main(args=sys.argv[1:]):
             log.exception('error in zabbix partition')
             log.exception(e)
 
-        try:
-            start_time = time.time()
-            zabbix.collect()
-            log.info('zabbix collect took %s seconds' % (time.time() - start_time))
-        except Exception as e:
-            log.exception('error in zabbix collect')
-            log.exception(e)
+        if not is_process_running():
+            try:
+                start_time = time.time()
+                zabbix.collect()
+                log.info('zabbix collect took %s seconds' % (time.time() - start_time))
+            except Exception as e:
+                log.exception('error in zabbix collect')
+                log.exception(e)
+        else:
+            log.info('Current Zabbix Collector is running, skip current execution')
 
         try:
             start_time = time.time()
