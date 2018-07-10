@@ -24,10 +24,13 @@ Installation
     # instructions in http://fedoraproject.org/wiki/Systemd
     max_allowed_packet=128M
     innodb_file_per_table=1
+    secure_file_priv="/home/cbis_kpi/"
 
     [mysqld_safe]
     log-error=/var/log/mariadb/mariadb.log
     pid-file=/var/run/mariadb/mariadb.pid
+
+
 
     [client]
     port=3306

@@ -11,7 +11,76 @@ import re
 import pyzabbix
 import json
 import threading
+import gzip
+import shutil
 import util
+
+
+def partition_util(table_name, number_of_days=14):
+    log = logging.getLogger('partition_util')
+    tomorrow = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    last_days = tomorrow - timedelta(days=number_of_days)
+    with util.DBConnection().get_connection() as conn:
+        curr = conn.cursor()
+
+        curr.execute('select config_value from config where config_key=\'database_export_location\'')
+
+        database_export_location = curr.fetchone()[0]
+
+        create_partition_name = 'p_%s' % (tomorrow.strftime('%s'),)
+
+        query_partition_sql = 'explain partitions select * from %s' % (table_name,)
+        curr.execute(query_partition_sql)
+        partition_list = curr.fetchone()[3]
+        found_created_partition = False
+        for partition_name in partition_list.split(','):
+            if 'p_0' in partition_name:
+                continue
+            if create_partition_name in partition_name:
+                found_created_partition = True
+            partition_name = partition_name.replace('p_', '')
+            partition_time = datetime.fromtimestamp(float(partition_name))
+
+            if partition_time < last_days:
+                try:
+                    yesterday_for_partition_time = partition_time - timedelta(days=1)
+
+                    database_export_file = "%s/%s_%s.csv" % (database_export_location, table_name, partition_time.strftime('%Y%m%d'))
+
+                    database_export_file_gzip = "%s/%s_%s.gz" % (database_export_location, table_name, partition_time.strftime('%Y%m%d'))
+
+                    export_sql = 'select * from %s where clock >= %s and clock < %s ' \
+                                 'into outfile \'%s\' ' \
+                                 'fields terminated by \',\' ' \
+                                 'enclosed by \'"\' ' \
+                                 'lines terminated by \'\\n\'' % (table_name, yesterday_for_partition_time.strftime('%s'), partition_time.strftime('%s'), database_export_file)
+
+                    curr.execute(export_sql)
+
+                    with open(database_export_file, 'rb') as f_in, gzip.open(database_export_file_gzip, 'wb') as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+
+                    drop_partition_sql = 'alter table %s drop partition p_%s' % (
+                        table_name, partition_time.strftime('%s'),)
+
+                    curr.execute(drop_partition_sql)
+                    log.info('dropped partition for %s p_%s' % (table_name, partition_time.strftime('%s'),))
+                except Exception as e:
+                    log.info('partition not found %s p_%s [%s]' % (table_name, partition_time.strftime('%s'), e))
+                pass
+
+        if not found_created_partition:
+            try:
+                create_partition_sql = 'alter table %s add partition (' \
+                                       'partition p_%s values less than (%s))' % \
+                                       (table_name, tomorrow.strftime('%s'), tomorrow.strftime('%s'))
+                curr.execute(create_partition_sql)
+                log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
+            except Exception as e:
+                log.info('partition has been created %s p_%s [%s]' % (table_name, tomorrow.strftime('%s'), e))
+                pass
+
+        conn.commit()
 
 
 class VirshThread(threading.Thread):
@@ -402,56 +471,10 @@ class VirshCollector(object):
     def _load_config(self):
         pass
 
-    def _partition_util(self, table_name, number_of_days=14):
-        tomorrow = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-        last_days = tomorrow - timedelta(days=number_of_days)
-        with util.DBConnection().get_connection() as conn:
-            curr = conn.cursor()
-
-            create_partition_name = 'p_%s' % (tomorrow.strftime('%s'),)
-
-            query_partition_sql = 'explain partitions select * from %s' % (table_name,)
-            curr.execute(query_partition_sql)
-            partition_list = curr.fetchone()[3]
-            found_created_partition = False
-            for partition_name in partition_list.split(','):
-                if 'p_0' in partition_name:
-                    continue
-                if create_partition_name in partition_name:
-                    found_created_partition = True
-                partition_name = partition_name.replace('p_', '')
-                partition_time = datetime.fromtimestamp(float(partition_name))
-                if partition_time < last_days:
-                    try:
-                        drop_partition_sql = 'alter table %s drop partition p_%s' % (
-                        table_name, partition_time.strftime('%s'),)
-                        self.log.info(
-                            'checking partition to delete for %s p_%s' % (table_name, partition_time.strftime('%s')))
-
-                        curr.execute(drop_partition_sql)
-                        self.log.info('dropped partition for %s p_%s' % (table_name, partition_time.strftime('%s'),))
-                    except Exception as e:
-                        self.log.info('partition not found %s p_%s [%s]' % (table_name, partition_time.strftime('%s'), e))
-                    pass
-
-            if not found_created_partition:
-                try:
-                    create_partition_sql = 'alter table %s add partition (' \
-                                           'partition p_%s values less than (%s))' % \
-                                           (table_name, tomorrow.strftime('%s'), tomorrow.strftime('%s'))
-                    self.log.info('checking partition to create for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-                    curr.execute(create_partition_sql)
-                    self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-                except Exception as e:
-                    self.log.info('partition has been created %s p_%s [%s]' % (table_name, tomorrow.strftime('%s'), e))
-                    pass
-
-            conn.commit()
-
     def partition(self):
-        self._partition_util('cbis_virsh_stat_raw', 14)
-        self._partition_util('cbis_virsh_stat_hour', 90)
-        self._partition_util('cbis_virsh_stat_day', 365)
+        partition_util('cbis_virsh_stat_raw', 90)
+        partition_util('cbis_virsh_stat_hour', 365)
+        partition_util('cbis_virsh_stat_day', 365)
 
     def collect(self):
         self.log.info('Connecting to database')
@@ -739,56 +762,12 @@ class ZabbixCollector(object):
 
             self._item_keys = list(keys)
 
-    def _partition_util(self, table_name, number_of_days=14):
-        tomorrow = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-        last_days = tomorrow - timedelta(days=number_of_days)
-        with util.DBConnection().get_connection() as conn:
-            curr = conn.cursor()
 
-            create_partition_name = 'p_%s' % (tomorrow.strftime('%s'),)
-
-            query_partition_sql = 'explain partitions select * from %s' % (table_name,)
-            curr.execute(query_partition_sql)
-            partition_list = curr.fetchone()[3]
-            found_created_partition = False
-            for partition_name in partition_list.split(','):
-                if 'p_0' in partition_name:
-                    continue
-                if create_partition_name in partition_name:
-                    found_created_partition = True
-                partition_name = partition_name.replace('p_', '')
-                partition_time = datetime.fromtimestamp(float(partition_name))
-                if partition_time < last_days:
-                    try:
-                        drop_partition_sql = 'alter table %s drop partition p_%s' % (
-                        table_name, partition_time.strftime('%s'),)
-                        self.log.info(
-                            'checking partition to delete for %s p_%s' % (table_name, partition_time.strftime('%s')))
-
-                        curr.execute(drop_partition_sql)
-                        self.log.info('dropped partition for %s p_%s' % (table_name, partition_time.strftime('%s'),))
-                    except Exception as e:
-                        self.log.info('partition not found %s p_%s [%s]' % (table_name, partition_time.strftime('%s'), e))
-                    pass
-
-            if not found_created_partition:
-                try:
-                    create_partition_sql = 'alter table %s add partition (' \
-                                           'partition p_%s values less than (%s))' % \
-                                           (table_name, tomorrow.strftime('%s'), tomorrow.strftime('%s'))
-                    self.log.info('checking partition to create for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-                    curr.execute(create_partition_sql)
-                    self.log.info('created partition for %s p_%s' % (table_name, tomorrow.strftime('%s'),))
-                except Exception as e:
-                    self.log.info('partition has been created %s p_%s [%s]' % (table_name, tomorrow.strftime('%s'), e))
-                    pass
-
-            conn.commit()
 
     def partition(self):
-        self._partition_util('cbis_zabbix_raw', 14)
-        self._partition_util('cbis_zabbix_hour', 90)
-        self._partition_util('cbis_zabbix_day', 365)
+        partition_util('cbis_zabbix_raw', 90)
+        partition_util('cbis_zabbix_hour', 365)
+        partition_util('cbis_zabbix_day', 365)
 
     def collect(self):
         self.log.info('Connecting to database')
@@ -1020,6 +999,6 @@ class CephDiskCollect(object):
 if __name__ == '__main__':
     PATH = os.path.dirname(os.path.abspath(__file__))
     logging.config.fileConfig(os.path.join(PATH, 'logging.ini'))
-    client = CephDiskCollect()
-    # client.partition()
-    client.collect()
+    client = ZabbixCollector()
+    client.partition()
+    #client.collect()

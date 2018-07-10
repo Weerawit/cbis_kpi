@@ -354,6 +354,7 @@ INSERT INTO `config` (`config_key`, `config_value`) VALUES ('zabbix_item_key', '
 INSERT INTO `config` (`config_key`, `config_value`) VALUES ('zabbix_item_key', 'vm.memory.size[available]');
 INSERT INTO `config` (`config_key`, `config_value`) VALUES ('zabbix_item_key', 'vm.memory.size[total]');
 INSERT INTO `config` (`config_key`, `config_value`) VALUES ('zabbix_query_interval', '15');
+INSERT INTO `config` (`config_key`, `config_value`) VALUES ('database_export_location', '/home/cbis_kpi/archive_table');
 
 
 CREATE TABLE `cbis_pod` (
