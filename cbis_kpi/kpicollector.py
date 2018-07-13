@@ -762,10 +762,8 @@ class ZabbixCollector(object):
 
             self._item_keys = list(keys)
 
-
-
     def partition(self):
-        partition_util('cbis_zabbix_raw', 90)
+        partition_util('cbis_zabbix_raw', 30)
         partition_util('cbis_zabbix_hour', 365)
         partition_util('cbis_zabbix_day', 365)
 
