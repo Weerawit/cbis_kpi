@@ -25,7 +25,7 @@ def partition_util(table_name, number_of_days=14):
 
         curr.execute('select config_value from config where config_key=\'database_export_location\'')
 
-        database_export_location = curr.fetchone()[0]
+        database_export_location = curr.fetchall()[0]
 
         create_partition_name = 'p_%s' % (tomorrow.strftime('%s'),)
 
