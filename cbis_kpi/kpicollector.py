@@ -25,7 +25,7 @@ def partition_util(table_name, number_of_days=14):
 
         curr.execute('select config_value from config where config_key=\'database_export_location\'')
 
-        database_export_location = curr.fetchall()[0]
+        database_export_location = str(curr.fetchall()[0][0])
 
         create_partition_name = 'p_%s' % (tomorrow.strftime('%s'),)
 
@@ -97,38 +97,40 @@ class VirshThread(threading.Thread):
 
     def run(self):
         with util.DBConnection().get_connection() as conn:
+            try:
+                cbis_undercloud_current_sync = time.time()
+                kwargs = {'cbis_undercloud_last_sync': self.cbis_undercloud_last_sync,
+                          'cbis_pod_id': self.cbis_pod_id,
+                          'cbis_undercloud_current_sync': cbis_undercloud_current_sync,
+                          'test_flag': False,
+                          'conn': conn}
 
-            cbis_undercloud_current_sync = time.time()
-            kwargs = {'cbis_undercloud_last_sync': self.cbis_undercloud_last_sync,
-                      'cbis_pod_id': self.cbis_pod_id,
-                      'cbis_undercloud_current_sync': cbis_undercloud_current_sync,
-                      'test_flag': False,
-                      'conn' : conn}
+                executor = util.SshExecutor(self.cbis_undercloud_addr, self.cbis_undercloud_username, **kwargs)
 
-            executor = util.SshExecutor(self.cbis_undercloud_addr, self.cbis_undercloud_username, **kwargs)
+                executor.run('compute-*',
+                             'sudo ip link; sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh dumpxml \\\" \$2)}\"',
+                             callback=self._callback_dumpxml)
 
-            executor.run('compute-*',
-                         'sudo ip link; sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh dumpxml \\\" \$2)}\"',
-                         callback=self._callback_dumpxml)
+                executor.run('undercloud',
+                             'source /home/stack/overcloudrc;openstack project list -f json;nova list --all --fields host,name,instance_name,tenant_id',
+                             callback=self._callback_novalist)
 
-            executor.run('undercloud',
-                         'source /home/stack/overcloudrc;openstack project list -f json;nova list --all --fields host,name,instance_name,tenant_id',
-                         callback=self._callback_novalist)
+                executor.run('compute-*',
+                             'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh domstats \\\" \$2)}\"',
+                             callback=self._callback_stat)
 
-            executor.run('compute-*',
-                         'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh domstats \\\" \$2)}\"',
-                         callback=self._callback_stat)
+                executor.run('compute-*',
+                             'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ print \\\"Domain: \\\" \$2; system(\\\"sudo virsh dommemstat \\\" \$2)}\"',
+                             callback=self._callback_memstat)
 
-            executor.run('compute-*',
-                         'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ print \\\"Domain: \\\" \$2; system(\\\"sudo virsh dommemstat \\\" \$2)}\"',
-                         callback=self._callback_memstat)
+                curr = conn.cursor()
 
-            curr = conn.cursor()
+                curr.execute('update cbis_pod set cbis_undercloud_last_sync = %s where cbis_pod_id = %s',
+                         (cbis_undercloud_current_sync, self.cbis_pod_id))
 
-            curr.execute('update cbis_pod set cbis_undercloud_last_sync = %s where cbis_pod_id = %s',
-                     (cbis_undercloud_current_sync, self.cbis_pod_id))
-
-            conn.commit()
+                conn.commit()
+            except Exception as e:
+                self.log.error("VirshThread error: {0}".format(e))
 
     def _callback_novalist(self, hostname, line_each_node, **kwargs):
         cbis_pod_id = kwargs.get('cbis_pod_id')
@@ -609,7 +611,10 @@ class ZabbixThread(threading.Thread):
 
     def run(self):
         with util.DBConnection().get_connection() as conn:
-            self._collect_pod(conn)
+            try:
+                self._collect_pod(conn)
+            except Exception as e:
+                self.log.error("ZabbixThread error: {0}".format(e))
 
     def _collect_pod(self, conn):
 
@@ -897,6 +902,7 @@ class CephDiskThread(threading.Thread):
 
     def __init__(self, cbis_pod_id, cbis_pod_name, cbis_undercloud_addr, cbis_undercloud_username):
         super(CephDiskThread, self).__init__()
+        self.log = logging.getLogger(self.__class__.__name__)
         self.cbis_pod_id = cbis_pod_id
         self.cbis_pod_name = cbis_pod_name
         self.cbis_undercloud_addr = cbis_undercloud_addr
@@ -906,17 +912,21 @@ class CephDiskThread(threading.Thread):
 
         with util.DBConnection().get_connection() as conn:
 
-            kwargs = {'cbis_pod_id': self.cbis_pod_id,
-                      'test_flag': False,
-                      'conn': conn}
+            try:
 
-            executor = util.SshExecutor(self.cbis_undercloud_addr, self.cbis_undercloud_username, **kwargs)
+                kwargs = {'cbis_pod_id': self.cbis_pod_id,
+                          'test_flag': False,
+                          'conn': conn}
 
-            executor.run('cephstorage-*',
-                         'sudo ceph-disk list | grep osd',
-                         callback=self._callback_cephdisk)
+                executor = util.SshExecutor(self.cbis_undercloud_addr, self.cbis_undercloud_username, **kwargs)
 
-            conn.commit()
+                executor.run('cephstorage-*',
+                             'sudo ceph-disk list | grep osd',
+                             callback=self._callback_cephdisk)
+
+                conn.commit()
+            except Exception as e:
+                self.log.error("CephDiskThread error: {0}".format(e))
 
     def _callback_cephdisk(self, hostname, line_each_node, **kwargs):
         domain_name = None
@@ -997,6 +1007,6 @@ class CephDiskCollect(object):
 if __name__ == '__main__':
     PATH = os.path.dirname(os.path.abspath(__file__))
     logging.config.fileConfig(os.path.join(PATH, 'logging.ini'))
-    client = ZabbixCollector()
+    client = VirshCollector()
     client.partition()
-    #client.collect()
+    client.collect()
