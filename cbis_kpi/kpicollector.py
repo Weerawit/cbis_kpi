@@ -112,10 +112,6 @@ class VirshThread(threading.Thread):
                              'sudo ip link; sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh dumpxml \\\" \$2)}\"',
                              callback=self._callback_dumpxml)
 
-                executor.run('undercloud',
-                             'source /home/stack/overcloudrc;openstack project list -f json;nova list --all --fields host,name,instance_name,tenant_id',
-                             callback=self._callback_novalist)
-
                 executor.run('compute-*',
                              'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ system(\\\"sudo virsh domstats \\\" \$2)}\"',
                              callback=self._callback_stat)
@@ -123,6 +119,10 @@ class VirshThread(threading.Thread):
                 executor.run('compute-*',
                              'sudo virsh list | head -n -1 | tail -n +3 | awk \"{ print \\\"Domain: \\\" \$2; system(\\\"sudo virsh dommemstat \\\" \$2)}\"',
                              callback=self._callback_memstat)
+
+                executor.run('undercloud',
+                             'source /home/stack/overcloudrc;openstack project list -f json;nova list --all --fields host,name,instance_name,tenant_id',
+                             callback=self._callback_novalist)
 
                 curr = conn.cursor()
 
