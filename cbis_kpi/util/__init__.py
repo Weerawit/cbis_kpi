@@ -171,8 +171,8 @@ class SshExecutor(object):
                     i += 1
 
         else:
-            self.log.error('Cannot execute command %s ' % cmd)
-            raise RuntimeError('Cannot execute command %s ' % cmd)
+            self.log.error('Cannot execute command %s on host %s' % (cmd, self.uc))
+            raise RuntimeError('Cannot execute command %s on host %s' % (cmd, self.uc))
 
 
 if __name__ == '__main__':

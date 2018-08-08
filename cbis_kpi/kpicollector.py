@@ -98,6 +98,7 @@ class VirshThread(threading.Thread):
     def run(self):
         with util.DBConnection().get_connection() as conn:
             try:
+                conn.start_transaction(isolation_level='READ COMMITTED')
                 cbis_undercloud_current_sync = time.time()
                 kwargs = {'cbis_undercloud_last_sync': self.cbis_undercloud_last_sync,
                           'cbis_pod_id': self.cbis_pod_id,
@@ -206,6 +207,7 @@ class VirshThread(threading.Thread):
                     pass
 
         with util.DBConnection().get_connection() as conn:
+            conn.start_transaction(isolation_level='READ COMMITTED')
 
             curr = conn.cursor()
 
@@ -522,6 +524,7 @@ class VirshCollector(object):
                       (last_hour.strftime('%Y-%m-%d %H:%M:%S'), current_hour.strftime('%Y-%m-%d %H:%M:%S')))
 
         with util.DBConnection().get_connection() as conn:
+            conn.start_transaction(isolation_level='READ COMMITTED')
 
             curr = conn.cursor()
 
@@ -565,7 +568,7 @@ class VirshCollector(object):
                       (yesterday.strftime('%Y-%m-%d %H:%M:%S'),today.strftime('%Y-%m-%d %H:%M:%S')))
 
         with util.DBConnection().get_connection() as conn:
-
+            conn.start_transaction(isolation_level='READ COMMITTED')
             curr = conn.cursor()
 
             curr.execute(sql, params)
@@ -612,7 +615,15 @@ class ZabbixThread(threading.Thread):
     def run(self):
         with util.DBConnection().get_connection() as conn:
             try:
-                self._collect_pod(conn)
+                conn.start_transaction(isolation_level='READ COMMITTED')
+                cbis_zabbix_last_sync = self._collect_pod(conn)
+
+                # commit
+                curr = conn.cursor()
+                curr.execute('update cbis_pod set cbis_zabbix_last_sync = %s where cbis_pod_id = %s',
+                             (cbis_zabbix_last_sync, self.cbis_pod_id))
+
+                conn.commit()
             except Exception as e:
                 self.log.error("ZabbixThread error: {0}".format(e))
 
@@ -722,14 +733,11 @@ class ZabbixThread(threading.Thread):
             if len(all_clock_timestamp) > 0:
                 cbis_zabbix_last_sync = max(all_clock_timestamp)
 
-            #commit
-            curr = conn.cursor()
-            curr.execute('update cbis_pod set cbis_zabbix_last_sync = %s where cbis_pod_id = %s',
-                         (cbis_zabbix_last_sync, self.cbis_pod_id))
-            conn.commit()
-
+            return cbis_zabbix_last_sync
         if not has_some_collected:
             self.log.info('Nothing to collect since current period not full period yet. ')
+
+        return self.cbis_zabbix_last_sync
 
     def _save_raw(self, conn, records):
         curr = conn.cursor()
@@ -824,6 +832,7 @@ class ZabbixCollector(object):
                       (last_hour.strftime('%Y-%m-%d %H:%M:%S'), current_hour.strftime('%Y-%m-%d %H:%M:%S')))
 
         with util.DBConnection().get_connection() as conn:
+            conn.start_transaction(isolation_level='READ COMMITTED')
 
             curr = conn.cursor()
 
@@ -868,6 +877,7 @@ class ZabbixCollector(object):
                       (yesterday.strftime('%Y-%m-%d %H:%M:%S'),today.strftime('%Y-%m-%d %H:%M:%S')))
 
         with util.DBConnection().get_connection() as conn:
+            conn.start_transaction(isolation_level='READ COMMITTED')
 
             curr = conn.cursor()
 
@@ -913,7 +923,7 @@ class CephDiskThread(threading.Thread):
         with util.DBConnection().get_connection() as conn:
 
             try:
-
+                conn.start_transaction(isolation_level='READ COMMITTED')
                 kwargs = {'cbis_pod_id': self.cbis_pod_id,
                           'test_flag': False,
                           'conn': conn}
@@ -1007,6 +1017,6 @@ class CephDiskCollect(object):
 if __name__ == '__main__':
     PATH = os.path.dirname(os.path.abspath(__file__))
     logging.config.fileConfig(os.path.join(PATH, 'logging.ini'))
-    client = VirshCollector()
+    client = ZabbixCollector()
     client.partition()
     client.collect()

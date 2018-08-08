@@ -438,6 +438,7 @@ CREATE TABLE `cbis_virsh_list` (
 	`vm_numa`                   varchar(128)    DEFAULT ''                NOT NULL
 ) ENGINE=InnoDB;
 CREATE INDEX `cbis_virsh_list_1` ON `cbis_virsh_list` (`cbis_pod_id`,`hostname`, `domain_name`);
+CREATE INDEX `cbis_virsh_list_2` ON `cbis_virsh_list` (`cbis_pod_id`,`hostname`);
 
 CREATE TABLE `cbis_virsh_meta` (
 	`cbis_pod_id`               bigint unsigned                           NOT NULL,
@@ -447,6 +448,7 @@ CREATE TABLE `cbis_virsh_meta` (
 	`meta_value`                varchar(128)    DEFAULT ''                NOT NULL
 ) ENGINE=InnoDB;
 CREATE INDEX `cbis_virsh_meta_1` ON `cbis_virsh_meta` (`cbis_pod_id`,`hostname`, `domain_name`, `meta_key`);
+CREATE INDEX `cbis_virsh_meta_2` ON `cbis_virsh_meta` (`cbis_pod_id`,`hostname`);
 
 
 CREATE TABLE `cbis_virsh_stat_raw` (
